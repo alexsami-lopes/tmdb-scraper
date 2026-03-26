@@ -1,0 +1,63 @@
+name: Scraper TMDb — Atualização Diária
+
+on:
+  # Roda todo dia às 07:00 UTC (04:00 Brasília / 03:00 horário de verão)
+  schedule:
+    - cron: '0 7 * * *'
+
+  # Permite disparar manualmente pela aba Actions no GitHub
+  workflow_dispatch:
+    inputs:
+      max_movies:
+        description: 'Número máximo de filmes a coletar'
+        required: false
+        default: '1000'
+
+jobs:
+  scrape:
+    name: Coletar filmes e salvar no Sheets
+    runs-on: ubuntu-latest
+    timeout-minutes: 120   # máximo de 2h (scraping de 1000 filmes pode levar ~60-90min)
+
+    steps:
+      # ── 1. Baixa o código do repositório ────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── 2. Configura o Node.js ───────────────────────────────────────────────
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'          # cacheia node_modules entre execuções
+
+      # ── 3. Instala dependências ──────────────────────────────────────────────
+      - name: Instalar dependências
+        run: npm ci              # install limpo baseado no package-lock.json
+
+      # ── 4. Roda o scraper ───────────────────────────────────────────────────
+      #    As variáveis de ambiente vêm dos Secrets do repositório.
+      #    Nunca coloque URLs ou secrets diretamente aqui no YAML.
+      - name: Executar scraper
+        env:
+          APPS_SCRIPT_URL:    ${{ secrets.APPS_SCRIPT_URL }}
+          APPS_SCRIPT_SECRET: ${{ secrets.APPS_SCRIPT_SECRET }}
+          MAX_MOVIES:         ${{ github.event.inputs.max_movies || '1000' }}
+        run: node scraper.js
+
+      # ── 5. Salva o log como artefato (opcional, útil para debug) ─────────────
+      - name: Upload log de execução
+        if: always()             # roda mesmo se o passo anterior falhar
+        uses: actions/upload-artifact@v4
+        with:
+          name: scraper-log-${{ github.run_id }}
+          path: scraper.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+      # ── 6. Notifica em caso de falha ─────────────────────────────────────────
+      - name: Notificar falha
+        if: failure()
+        run: |
+          echo "::error::O scraper falhou! Verifique o log acima."
+          echo "::error::Possíveis causas: TMDb bloqueou requisições, APPS_SCRIPT_URL inválida, ou timeout."
