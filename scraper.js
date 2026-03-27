@@ -1,11 +1,16 @@
 /**
  * TMDb Now Playing — Scraper JavaScript
  *
- * Coleta até 1000 filmes em cartaz do themoviedb.org via scraping (sem usar a API oficial),
+ * Coleta filmes em cartaz do themoviedb.org via scraping (sem API oficial),
  * depois salva os dados no Google Sheets via Apps Script Web App.
  *
+ * Lógica de encerramento:
+ *  - Antes de scraping, consulta o Apps Script para saber o total de registros
+ *  - Se total >= RECORDS_LIMIT, encerra com exit code 2 (sinaliza ao workflow)
+ *  - O workflow detecta o exit code 2 e envia e-mail pedindo desativação manual
+ *
  * Dependências: cheerio, node-fetch
- * Node.js >= 18 (fetch nativo disponível, mas foi usado o node-fetch considerando compatibilidade)
+ * Node.js >= 18
  */
 
 import fetch from 'node-fetch';
@@ -14,17 +19,17 @@ import * as cheerio from 'cheerio';
 // ─── CONFIGURAÇÃO ────────────────────────────────────────────────────────────
 
 const CONFIG = {
-  baseUrl:      'https://www.themoviedb.org',
-  nowPlayingUrl:'https://www.themoviedb.org/movie/now-playing',
-  maxMovies:    1000,
-  delayMs:      900,       // delay entre requisições (ms) — respeita o servidor
-  retries:      3,          // tentativas por página em caso de falha
-  // URL da Web App do Apps Script — vem da variável de ambiente
-  sheetsApiUrl: process.env.APPS_SCRIPT_URL,
-  sheetsSecret: process.env.APPS_SCRIPT_SECRET,
+  baseUrl:       'https://www.themoviedb.org',
+  nowPlayingUrl: 'https://www.themoviedb.org/movie/now-playing',
+  maxMovies:     1000,
+  delayMs:       900,
+  retries:       3,
+  sheetsApiUrl:  process.env.APPS_SCRIPT_URL,
+  sheetsSecret:  process.env.APPS_SCRIPT_SECRET,
+  // Limite de registros históricos — ao atingir, encerra a rotina diária
+  recordsLimit:  1200,
 };
 
-// Headers que simulam um browser real
 const HEADERS = {
   'User-Agent':
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ' +
@@ -43,13 +48,9 @@ function warn(msg) { console.warn(`[${new Date().toISOString()}] ⚠ ${msg}`); }
 function err(msg)  { console.error(`[${new Date().toISOString()}] ✗ ${msg}`); }
 
 function today() {
-  return new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
+  return new Date().toISOString().slice(0, 10);
 }
 
-/**
- * Faz uma requisição HTTP com retry automático em caso de falha.
- * Retorna o HTML como string ou null se todas as tentativas falharem.
- */
 async function fetchHtml(url, attempt = 1) {
   try {
     const res = await fetch(url, { headers: HEADERS, redirect: 'follow', timeout: 20000 });
@@ -66,12 +67,30 @@ async function fetchHtml(url, attempt = 1) {
   }
 }
 
-// ─── FASE 1: COLETA DE LINKS ─────────────────────────────────────────────────
+// ─── PRÉ-CHECAGEM: TOTAL DE REGISTROS NO SHEETS ──────────────────────────────
 
 /**
- * Percorre as páginas de /movie/now-playing coletando URLs únicas de filmes.
- * O TMDb usa ?page=N para paginação — cada página tem ~20 filmes.
+ * Consulta o Apps Script para saber quantos registros existem no total.
+ * O Apps Script responde a ?action=count com { total: N }.
+ * Retorna o número total ou null em caso de falha.
  */
+async function getTotalRecords() {
+  if (!CONFIG.sheetsApiUrl) return null;
+
+  try {
+    const url = `${CONFIG.sheetsApiUrl}?action=count&secret=${encodeURIComponent(CONFIG.sheetsSecret || '')}`;
+    const res  = await fetch(url, { redirect: 'follow', timeout: 10000 });
+    const text = await res.text();
+    const json = JSON.parse(text);
+    return typeof json.total === 'number' ? json.total : null;
+  } catch (e) {
+    warn(`Não foi possível consultar total de registros: ${e.message}`);
+    return null;
+  }
+}
+
+// ─── COLETA DE LINKS ─────────────────────────────────────────────────────────
+
 async function collectMovieLinks() {
   const links = new Set();
   let page = 1;
@@ -88,11 +107,9 @@ async function collectMovieLinks() {
     const $ = cheerio.load(html);
     let newOnPage = 0;
 
-    // Links de filmes seguem o padrão /movie/NNNNN-nome-do-filme
     $('a[href]').each((_, el) => {
       const href = $(el).attr('href') || '';
       if (/^\/movie\/\d+/.test(href) && !href.includes('now-playing')) {
-        // Normaliza: remove query string, anchors e trailing slash
         const clean = `${CONFIG.baseUrl}${href.split('?')[0].split('#')[0].replace(/\/$/, '')}`;
         if (!links.has(clean)) {
           links.add(clean);
@@ -115,11 +132,8 @@ async function collectMovieLinks() {
   return [...links].slice(0, CONFIG.maxMovies);
 }
 
-// ─── FASE 2: EXTRAÇÃO DE DADOS DE CADA FILME ─────────────────────────────────
+// ─── EXTRAÇÃO DE DADOS ───────────────────────────────────────────────────────
 
-/**
- * Extrai o número de minutos de uma string como "2h 15m" ou "1h" ou "45m".
- */
 function parseRuntime(text) {
   if (!text) return null;
   const h = text.match(/(\d+)h/);
@@ -128,66 +142,43 @@ function parseRuntime(text) {
   return total > 0 ? total : null;
 }
 
-/**
- * Extrai a nota de avaliação de um elemento com data-percent.
- * O TMDb armazena como porcentagem (ex: 82 = nota 8.2).
- */
 function parseScore($) {
-  // Tenta elemento com data-percent (gráfico circular)
   const chart = $('[data-percent]').first();
   if (chart.length) {
     const pct = parseFloat(chart.attr('data-percent'));
     if (!isNaN(pct) && pct > 0) return Math.round((pct / 10) * 10) / 10;
   }
-
-  // Fallback: texto de porcentagem em spans
   let score = null;
   $('span.percent, div.percent').each((_, el) => {
     const txt = $(el).text().replace('%', '').trim();
     const val = parseFloat(txt);
     if (!isNaN(val) && val > 0 && val <= 100) {
       score = Math.round((val / 10) * 10) / 10;
-      return false; // break
+      return false;
     }
   });
   return score;
 }
 
-/**
- * Extrai a URL completa do poster a partir da div.poster_wrapper ou similar.
- */
 function parsePoster($, baseUrl) {
-  // Tenta dentro da div de poster
   const posterDiv = $('div.poster_wrapper, div.poster, section.poster').first();
   let src = null;
-
   if (posterDiv.length) {
     const img = posterDiv.find('img').first();
     src = img.attr('src') || img.attr('data-src') || img.attr('srcset')?.split(' ')[0];
   }
-
-  // Fallback: primeira imagem com "poster" na URL ou classe
   if (!src) {
     $('img').each((_, el) => {
       const s = $(el).attr('src') || '';
-      if (s.includes('poster') || s.includes('/p/')) {
-        src = s;
-        return false;
-      }
+      if (s.includes('poster') || s.includes('/p/')) { src = s; return false; }
     });
   }
-
   if (!src) return null;
   return src.startsWith('http') ? src : `${baseUrl}${src}`;
 }
 
-/**
- * Extrai a imagem de backdrop do estilo inline da div de cabeçalho.
- */
 function parseBackdrop($) {
   let backdrop = null;
-
-  // O TMDb coloca o backdrop como background-image inline
   $('[style*="background-image"]').each((_, el) => {
     const style = $(el).attr('style') || '';
     const match = style.match(/url\(['"]?([^'")\s]+)['"]?\)/);
@@ -196,50 +187,35 @@ function parseBackdrop($) {
       return false;
     }
   });
-
   return backdrop;
 }
 
-/**
- * Scraping completo de uma página de filme individual.
- * Retorna um objeto com todos os campos necessários.
- */
 async function scrapeMovie(url) {
   const html = await fetchHtml(url);
   if (!html) return null;
 
   const $ = cheerio.load(html);
-
-  // ID via URL
   const idMatch = url.match(/\/movie\/(\d+)/);
   const id = idMatch ? parseInt(idMatch[1]) : null;
 
-  // Título — h2.title > a ou h2 dentro de .title
   let title = null;
   const titleEl = $('h2.title a, div.title h2 a, section.header h2 a').first();
   if (titleEl.length) {
     title = titleEl.text().trim();
   } else {
-    // Fallback: <title> da página
     const pageTitle = $('title').text() || '';
     title = pageTitle.split('—')[0].split('-')[0].trim() || null;
   }
 
-  // Nota
   const voteAverage = parseScore($);
 
-  // Contagem de votos — geralmente aparece como "1,234 ratings" ou similar
   let voteCount = null;
   $('span, div').each((_, el) => {
     const txt = $(el).text().trim();
     const match = txt.match(/^([\d,\.]+)\s*(ratings?|avalia)/i);
-    if (match) {
-      voteCount = parseInt(match[1].replace(/[,\.]/g, ''));
-      return false;
-    }
+    if (match) { voteCount = parseInt(match[1].replace(/[,\.]/g, '')); return false; }
   });
 
-  // Popularidade — aparece no painel lateral como número
   let popularity = null;
   $('p strong.alt, bdi').each((_, el) => {
     const parent = $(el).parent();
@@ -250,59 +226,48 @@ async function scrapeMovie(url) {
     }
   });
 
-  // Poster e backdrop
   const posterPath   = parsePoster($, CONFIG.baseUrl);
   const backdropPath = parseBackdrop($);
 
-  // Sinopse
   const overview = (
     $('div.overview p').first().text() ||
-    $('p.overview').first().text() ||
-    ''
+    $('p.overview').first().text() || ''
   ).trim() || null;
 
-  // Gêneros — links com /genre/ na URL
   const genres = [];
   $('a[href*="/genre/"]').each((_, el) => {
     const g = $(el).text().trim();
     if (g && !genres.includes(g)) genres.push(g);
   });
 
-  // Data de lançamento — busca padrão DD/MM/YYYY ou YYYY-MM-DD
   let releaseDate = null;
   const bodyText = $('body').text();
   const dateMatch = bodyText.match(/(\d{2}\/\d{2}\/\d{4}|\d{4}-\d{2}-\d{2})/);
   if (dateMatch) releaseDate = dateMatch[1];
 
-  // Runtime — busca "Xh Ym" no texto da página
   let runtime = null;
   const rtMatch = bodyText.match(/(\d+h\s*\d*m?|\d+h|\d+m\b)/);
   if (rtMatch) runtime = parseRuntime(rtMatch[1]);
 
-  // Idioma original e status — painel lateral de fatos
   let originalLanguage = null;
   let status = null;
-
   $('section.facts p, div.facts p').each((_, el) => {
     const strong = $(el).find('strong.alt').text().toLowerCase();
     const value  = $(el).text().replace($(el).find('strong').text(), '').trim();
     if (strong.includes('idioma') || strong.includes('language')) originalLanguage = value;
-    if (strong.includes('status'))  status = value;
+    if (strong.includes('status')) status = value;
   });
 
-  // Elenco — seção de cast cards
   const cast = [];
   $('ol.people.scroller li.card, section.cast ol li.card').each((_, el) => {
     const name      = $(el).find('p:not(.character)').first().text().trim();
     const character = $(el).find('p.character').text().trim();
     if (name) cast.push({ name, character: character || null });
-    if (cast.length >= 10) return false; // máx 10 atores
+    if (cast.length >= 10) return false;
   });
 
-  // Equipe — diretor e roteirista
-  let director    = null;
+  let director = null;
   const screenplay = [];
-
   $('ol.people li.card, section.crew ol li.card').each((_, el) => {
     const name = $(el).find('p:not(.job)').first().text().trim();
     const job  = $(el).find('p.job').text().trim().toLowerCase();
@@ -315,34 +280,24 @@ async function scrapeMovie(url) {
   });
 
   return {
-    id,
-    url,
-    title,
+    id, url, title,
     vote_average:      voteAverage,
     vote_count:        voteCount,
     popularity,
     poster_path:       posterPath,
     backdrop_path:     backdropPath,
-    overview,
-    genres,
+    overview, genres,
     release_date:      releaseDate,
     runtime,
     original_language: originalLanguage,
-    status,
-    cast,
-    director,
-    screenplay,
+    status, cast, director, screenplay,
     scraped_at:        new Date().toISOString(),
     date:              today(),
   };
 }
 
-// ─── FASE 3: ENVIO PARA O GOOGLE SHEETS ─────────────────────────────────────
+// ─── ENVIO PARA O GOOGLE SHEETS ──────────────────────────────────────────────
 
-/**
- * Envia o array de filmes para a Web App do Apps Script via POST.
- * O Apps Script recebe, valida o secret e insere na planilha.
- */
 async function sendToSheets(movies) {
   if (!CONFIG.sheetsApiUrl) {
     warn('APPS_SCRIPT_URL não definido — pulando envio para Sheets.');
@@ -358,14 +313,12 @@ async function sendToSheets(movies) {
   };
 
   try {
-    const res = await fetch(CONFIG.sheetsApiUrl, {
-      method:  'POST',
+    const res  = await fetch(CONFIG.sheetsApiUrl, {
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify(payload),
-      // Apps Script redireciona POST — precisamos seguir o redirect
       redirect: 'follow',
     });
-
     const text = await res.text();
     let json;
     try { json = JSON.parse(text); } catch { json = { raw: text }; }
@@ -392,11 +345,29 @@ async function main() {
   log(`Data: ${today()}`);
   log('═══════════════════════════════════════════');
 
-  // 1. Coleta links
+  // ── 1. Verifica total de registros antes de qualquer scraping ──────────────
+  log('\nConsultando total de registros no Google Sheets...');
+  const totalRecords = await getTotalRecords();
+
+  if (totalRecords !== null) {
+    log(`Total atual de registros: ${totalRecords} / ${CONFIG.recordsLimit}`);
+
+    if (totalRecords >= CONFIG.recordsLimit) {
+      // Exit code 2 = limite atingido (não é erro, é conclusão)
+      // O workflow captura esse código e envia e-mail
+      log(`\n⚠ LIMITE ATINGIDO: ${totalRecords} registros >= ${CONFIG.recordsLimit}`);
+      log('Encerrando scraper. O workflow enviará notificação por e-mail.');
+      process.exit(2);
+    }
+  } else {
+    warn('Não foi possível verificar o total — prosseguindo com scraping normalmente.');
+  }
+
+  // ── 2. Coleta links ────────────────────────────────────────────────────────
   const links = await collectMovieLinks();
   log(`\nTotal de links coletados: ${links.length}\n`);
 
-  // 2. Scraping de cada filme
+  // ── 3. Scraping de cada filme ──────────────────────────────────────────────
   const movies = [];
   const errors = [];
 
@@ -405,16 +376,14 @@ async function main() {
     log(`[${i + 1}/${links.length}] ${url}`);
 
     const movie = await scrapeMovie(url);
-
     if (movie) {
       movies.push(movie);
       log(`  ✓ "${movie.title}" | Nota: ${movie.vote_average ?? '—'} | Gêneros: ${movie.genres.join(', ')}`);
     } else {
       errors.push(url);
-      log(`  ✗ Falha`);
+      log('  ✗ Falha');
     }
 
-    // Log de progresso a cada 50 filmes
     if ((i + 1) % 50 === 0) {
       log(`\n── Progresso: ${movies.length} filmes OK, ${errors.length} erros ──\n`);
     }
@@ -422,7 +391,7 @@ async function main() {
     await sleep(CONFIG.delayMs);
   }
 
-  // 3. Envia para Google Sheets
+  // ── 4. Envia para Sheets ───────────────────────────────────────────────────
   const duration = Date.now() - startTime;
   log('\n═══════════════════════════════════════════');
   log(`Scraping concluído em ${(duration / 1000 / 60).toFixed(1)} minutos`);
@@ -432,13 +401,13 @@ async function main() {
 
   const sheetsOk = await sendToSheets(movies);
 
-  // Exit code 1 se o envio para Sheets falhar (GitHub Actions vai marcar como falha)
   if (!sheetsOk && CONFIG.sheetsApiUrl) {
     err('Envio para Sheets falhou.');
     process.exit(1);
   }
 
   log('Tudo pronto! ✓');
+  // exit code 0 = sucesso normal
 }
 
 main().catch(e => {

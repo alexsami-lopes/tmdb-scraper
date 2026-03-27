@@ -1,11 +1,8 @@
 name: Scraper TMDb — Atualização Diária
 
 on:
-  # Roda todo dia às 07:00 UTC (04:00 Brasília / 03:00 horário de verão)
   schedule:
     - cron: '0 7 * * *'
-
-  # Permite disparar manualmente pela aba Actions no GitHub
   workflow_dispatch:
     inputs:
       max_movies:
@@ -17,47 +14,134 @@ jobs:
   scrape:
     name: Coletar filmes e salvar no Sheets
     runs-on: ubuntu-latest
-    timeout-minutes: 120   # máximo de 2h (scraping de 1000 filmes pode levar ~60-90min)
+    timeout-minutes: 120
+
+    # Permite que o job continue mesmo com exit code diferente de 0,
+    # para que possamos inspecionar o código de saída nos passos seguintes
+    continue-on-error: true
 
     steps:
-      # ── 1. Baixa o código do repositório ────────────────────────────────────
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── 2. Configura o Node.js ───────────────────────────────────────────────
       - name: Setup Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'          # cacheia node_modules entre execuções
+          cache: 'npm'
 
-      # ── 3. Instala dependências ──────────────────────────────────────────────
       - name: Instalar dependências
-        run: npm ci              # install limpo baseado no package-lock.json
+        run: npm ci
 
-      # ── 4. Roda o scraper ───────────────────────────────────────────────────
-      #    As variáveis de ambiente vêm dos Secrets do repositório.
-      #    Nunca coloque URLs ou secrets diretamente aqui no YAML.
+      # ── Roda o scraper e captura o exit code ──────────────────────────────
       - name: Executar scraper
+        id: scraper
         env:
           APPS_SCRIPT_URL:    ${{ secrets.APPS_SCRIPT_URL }}
           APPS_SCRIPT_SECRET: ${{ secrets.APPS_SCRIPT_SECRET }}
           MAX_MOVIES:         ${{ github.event.inputs.max_movies || '1000' }}
-        run: node scraper.js
+        # O "|| true" evita que o workflow falhe aqui — checamos o código depois
+        run: |
+          node scraper.js
+          echo "exit_code=$?" >> $GITHUB_OUTPUT
+        # Shell trick: captura o exit code mesmo quando node retorna != 0
+        shell: bash
+        continue-on-error: true
 
-      # ── 5. Salva o log como artefato (opcional, útil para debug) ─────────────
+      # ── Detecta exit code e define variáveis de controle ──────────────────
+      - name: Verificar resultado do scraper
+        id: check
+        shell: bash
+        run: |
+          CODE="${{ steps.scraper.outputs.exit_code }}"
+          echo "Scraper encerrou com código: $CODE"
+
+          if [ "$CODE" = "0" ]; then
+            echo "result=success" >> $GITHUB_OUTPUT
+            echo "✅ Scraping concluído com sucesso."
+
+          elif [ "$CODE" = "2" ]; then
+            echo "result=limit_reached" >> $GITHUB_OUTPUT
+            echo "⚠️ Limite de registros atingido — notificação será enviada."
+
+          else
+            echo "result=failure" >> $GITHUB_OUTPUT
+            echo "❌ Scraper falhou com código $CODE."
+          fi
+
+      # ── Envia e-mail quando limite é atingido ─────────────────────────────
+      # Usa a action "dawidd6/action-send-mail" — gratuita, sem configuração extra.
+      # Requer dois secrets adicionais: NOTIFY_EMAIL_USER e NOTIFY_EMAIL_PASS
+      # (conta Gmail com "senha de app" — veja o README para instruções)
+      - name: Enviar e-mail — limite atingido
+        if: steps.check.outputs.result == 'limit_reached'
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port:    465
+          secure:         true
+          username:       ${{ secrets.NOTIFY_EMAIL_USER }}
+          password:       ${{ secrets.NOTIFY_EMAIL_PASS }}
+          to:             alexsami.lopes@gmail.com
+          from:           TMDb Scraper <${{ secrets.NOTIFY_EMAIL_USER }}>
+          subject:        "🎬 TMDb Scraper — Limite de 1200 registros atingido"
+          body: |
+            Olá!
+
+            O scraper de filmes em cartaz atingiu o limite configurado de 1200 registros históricos no Google Sheets.
+
+            ✅ O que isso significa:
+            A coleta de dados foi concluída conforme planejado. O histórico de filmes em cartaz está completo.
+
+            🛑 Ação necessária:
+            Por favor, desative o agendamento diário do scraper para não continuar rodando sem necessidade.
+
+            Como desativar:
+            1. Acesse: https://github.com/${{ github.repository }}/actions/workflows/daily-scraper.yml
+            2. Clique no botão "..." (canto superior direito)
+            3. Selecione "Disable workflow"
+
+            Ou, se preferir manter o arquivo mas pausar a execução, edite o arquivo
+            .github/workflows/daily-scraper.yml e comente as linhas do "schedule:".
+
+            Repositório: https://github.com/${{ github.repository }}
+            Execução:    https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            —
+            GitHub Actions / TMDb Scraper
+
+      # ── Desabilita o workflow automaticamente após enviar o e-mail ─────────
+      # Usa a GitHub API para desativar o próprio workflow.
+      # Requer um Personal Access Token (PAT) com permissão "workflow".
+      # Adicione como secret: WORKFLOW_PAT
+      - name: Desabilitar workflow automaticamente
+        if: steps.check.outputs.result == 'limit_reached'
+        env:
+          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+        shell: bash
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "⚠️ WORKFLOW_PAT não configurado — desativação automática pulada."
+            echo "Por favor, desative manualmente conforme instruído no e-mail."
+          else
+            echo "Desativando workflow via GitHub API..."
+            gh workflow disable "daily-scraper.yml" --repo "${{ github.repository }}"
+            echo "✅ Workflow desativado com sucesso."
+          fi
+
+      # ── Falha explícita se o scraper teve erro real ────────────────────────
+      - name: Falhar se houve erro no scraper
+        if: steps.check.outputs.result == 'failure'
+        run: |
+          echo "::error::O scraper falhou! Verifique os logs acima."
+          exit 1
+
+      # ── Upload de log para debug ───────────────────────────────────────────
       - name: Upload log de execução
-        if: always()             # roda mesmo se o passo anterior falhar
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: scraper-log-${{ github.run_id }}
           path: scraper.log
           if-no-files-found: ignore
           retention-days: 7
-
-      # ── 6. Notifica em caso de falha ─────────────────────────────────────────
-      - name: Notificar falha
-        if: failure()
-        run: |
-          echo "::error::O scraper falhou! Verifique o log acima."
-          echo "::error::Possíveis causas: TMDb bloqueou requisições, APPS_SCRIPT_URL inválida, ou timeout."
