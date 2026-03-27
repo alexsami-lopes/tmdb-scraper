@@ -138,26 +138,35 @@ function doPost(e) {
 
 /**
  * Responde a requisições GET da API.
- * Chamado pelo scraper (action=count) e pelo frontend no futuro.
+ *
+ * Endpoints PÚBLICOS (frontend) — sem secret:
+ *   ?action=ranking&date=YYYY-MM-DD
+ *   ?action=top20&date=YYYY-MM-DD
+ *   ?action=dates
+ *   ?action=history&id=NNNNN
+ *   ?action=trending
+ *   ?action=runs
+ *
+ * Endpoints PRIVADOS (scraper) — exigem secret:
+ *   ?action=count&secret=...
  */
 function doGet(e) {
   const params = e.parameter || {};
-  const action = params.action || 'count';
+  const action = params.action || '';
   const secret = params.secret || '';
 
-  // Valida secret em todas as rotas
-  if (secret !== SECRET) {
-    return jsonResponse({ status: 'error', message: 'Unauthorized' });
+  // Endpoints privados — exigem secret
+  if (action === 'count') {
+    if (secret !== SECRET) {
+      return jsonResponse({ status: 'error', message: 'Unauthorized' });
+    }
+    return jsonResponse({ status: 'ok', total: getTotalCount() });
   }
 
   try {
     switch (action) {
 
-      // Total de registros — usado pelo scraper para checar o limite
-      case 'count':
-        return jsonResponse({ status: 'ok', total: getTotalCount() });
-
-      // Top 10 por nota de um dia específico (ou hoje)
+      // Top 10 por nota de um dia (padrão: hoje)
       case 'ranking': {
         const date = params.date || today();
         const data = getMoviesByDate(date);
@@ -168,7 +177,7 @@ function doGet(e) {
         return jsonResponse({ status: 'ok', date, ranking: ranked });
       }
 
-      // Top 20 por popularidade de um dia específico (ou hoje)
+      // Top 20 por nota de um dia (padrão: hoje)
       case 'top20': {
         const date = params.date || today();
         const data = getMoviesByDate(date);
@@ -179,34 +188,27 @@ function doGet(e) {
         return jsonResponse({ status: 'ok', date, movies: top });
       }
 
-      // Lista de datas disponíveis na planilha
-      case 'dates': {
-        const dates = getAvailableDates();
-        return jsonResponse({ status: 'ok', dates });
-      }
+      // Lista de datas disponíveis
+      case 'dates':
+        return jsonResponse({ status: 'ok', dates: getAvailableDates() });
 
       // Histórico de um filme pelo ID
       case 'history': {
         const id = parseInt(params.id);
         if (!id) return jsonResponse({ status: 'error', message: 'id obrigatório' });
-        const history = getMovieHistory(id);
-        return jsonResponse({ status: 'ok', id, history });
+        return jsonResponse({ status: 'ok', id, history: getMovieHistory(id) });
       }
 
-      // Filmes que aparecem há mais dias consecutivos
-      case 'trending': {
-        const trending = getTrending();
-        return jsonResponse({ status: 'ok', trending });
-      }
+      // Filmes que aparecem há mais dias
+      case 'trending':
+        return jsonResponse({ status: 'ok', trending: getTrending() });
 
       // Log de execuções
-      case 'runs': {
-        const runs = getRunsLog();
-        return jsonResponse({ status: 'ok', runs });
-      }
+      case 'runs':
+        return jsonResponse({ status: 'ok', runs: getRunsLog() });
 
       default:
-        return jsonResponse({ status: 'error', message: `Ação desconhecida: ${action}` });
+        return jsonResponse({ status: 'error', message: 'Ação desconhecida: ' + action });
     }
 
   } catch (err) {

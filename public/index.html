@@ -1,0 +1,1155 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CineRank — Filmes em Cartaz</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=Libre+Franklin:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ── TOKENS ─────────────────────────────────────────── */
+    :root {
+      --ink:      #0c0b0e;
+      --paper:    #f5f0e8;
+      --cream:    #ede8dc;
+      --gold:     #c9a84c;
+      --gold-lt:  #e8c96a;
+      --red:      #b52c2c;
+      --mid:      #6b6560;
+      --rule:     rgba(12,11,14,.12);
+      --ease:     cubic-bezier(.22,.68,0,1.2);
+      --ease-out: cubic-bezier(0,.55,.45,1);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: 'Libre Franklin', sans-serif;
+      background: var(--ink);
+      color: var(--paper);
+      overflow-x: hidden;
+    }
+    img { display: block; max-width: 100%; }
+    a   { color: inherit; text-decoration: none; }
+
+    /* noise overlay */
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      pointer-events: none; z-index: 9999; opacity: .03;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+      background-size: 128px;
+    }
+
+    /* ── MASTHEAD ───────────────────────────────────────── */
+    .masthead {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      height: 60px;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 clamp(1.5rem, 5vw, 4rem);
+      background: rgba(12,11,14,.85);
+      border-bottom: 1px solid rgba(201,168,76,.2);
+      backdrop-filter: blur(12px);
+    }
+    .logo {
+      font-family: 'Playfair Display', serif;
+      font-size: 1.3rem; font-weight: 900;
+      letter-spacing: -.02em;
+    }
+    .logo span { color: var(--gold); }
+
+    .nav {
+      display: flex; gap: 0;
+      background: rgba(255,255,255,.05);
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .nav a {
+      font-size: .68rem; font-weight: 700;
+      letter-spacing: .12em; text-transform: uppercase;
+      color: rgba(255,255,255,.5);
+      padding: .45rem 1rem;
+      transition: background .2s, color .2s;
+    }
+    .nav a:hover, .nav a.active {
+      background: var(--gold);
+      color: var(--ink);
+    }
+
+    .date-pill {
+      display: flex; align-items: center; gap: .6rem;
+    }
+    .date-pill label {
+      font-size: .65rem; font-weight: 700;
+      letter-spacing: .12em; text-transform: uppercase;
+      color: var(--mid);
+    }
+    .date-pill select {
+      background: rgba(255,255,255,.06);
+      border: 1px solid rgba(255,255,255,.1);
+      color: var(--paper);
+      font-family: inherit; font-size: .72rem;
+      padding: .3rem .6rem;
+      border-radius: 3px;
+      cursor: pointer;
+      outline: none;
+    }
+    .date-pill select:focus { border-color: var(--gold); }
+
+    @media (max-width: 640px) {
+      .nav { display: none; }
+      .date-pill label { display: none; }
+    }
+
+    /* ── HERO ───────────────────────────────────────────── */
+    .hero {
+      margin-top: 60px;
+      height: 85vh; min-height: 500px;
+      position: relative; overflow: hidden;
+      display: flex; align-items: flex-end;
+      background: #0a0a12;
+    }
+    .hero__bg {
+      position: absolute; inset: 0;
+      background-size: cover; background-position: center 20%;
+      opacity: 0;
+      transition: opacity 1s, background-image .5s;
+      transform: scale(1.05);
+      animation: hzoom 24s ease-in-out infinite alternate;
+    }
+    .hero__bg.loaded { opacity: .4; }
+    @keyframes hzoom {
+      from { transform: scale(1.05); }
+      to   { transform: scale(1.12); }
+    }
+    .hero__vignette {
+      position: absolute; inset: 0;
+      background: linear-gradient(180deg,
+        rgba(12,11,14,0) 20%,
+        rgba(12,11,14,.6) 60%,
+        rgba(12,11,14,.98) 100%
+      );
+    }
+    .hero__content {
+      position: relative; z-index: 2;
+      padding: clamp(2rem,5vw,5rem) clamp(1.5rem,6vw,6rem);
+      max-width: 680px;
+      opacity: 0; transform: translateY(20px);
+      animation: fadeUp .8s var(--ease) .2s forwards;
+    }
+    .hero__tag {
+      display: inline-flex; align-items: center; gap: .5rem;
+      font-size: .65rem; font-weight: 700;
+      letter-spacing: .18em; text-transform: uppercase;
+      color: var(--gold); margin-bottom: 1rem;
+    }
+    .hero__tag::before { content:''; width:28px; height:1px; background:var(--gold); }
+    .hero__title {
+      font-family: 'Playfair Display', serif;
+      font-size: clamp(2.2rem,5.5vw,4rem);
+      font-weight: 900; line-height: 1.05;
+      margin-bottom: .8rem;
+    }
+    .hero__meta {
+      display: flex; align-items: center;
+      gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap;
+    }
+    .score-badge {
+      display: inline-flex; align-items: center; gap: .3rem;
+      font-size: .75rem; font-weight: 700;
+      padding: .3rem .7rem; border-radius: 2px;
+      background: var(--gold); color: var(--ink);
+    }
+    .hero__genre {
+      font-size: .7rem; letter-spacing: .07em;
+      text-transform: uppercase; color: rgba(255,255,255,.5);
+    }
+    .hero__overview {
+      font-size: .88rem; line-height: 1.75;
+      color: rgba(255,255,255,.65);
+      display: -webkit-box;
+      -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+      overflow: hidden; max-width: 500px;
+    }
+    .hero__dots {
+      position: absolute; bottom: 1.8rem;
+      right: clamp(1.5rem,6vw,6rem); z-index: 2;
+      display: flex; gap: .4rem;
+    }
+    .hero__dot {
+      width: 20px; height: 3px;
+      background: rgba(255,255,255,.25);
+      cursor: pointer; border-radius: 2px;
+      transition: background .3s, width .3s;
+    }
+    .hero__dot.active { background: var(--gold); width: 36px; }
+
+    /* ── SECTIONS ───────────────────────────────────────── */
+    .section {
+      padding: clamp(3rem,5vw,5rem) clamp(1.5rem,6vw,6rem);
+    }
+    .section-header {
+      display: flex; align-items: baseline;
+      gap: 1.2rem; margin-bottom: 2.5rem;
+    }
+    .section-label {
+      font-size: .62rem; font-weight: 700;
+      letter-spacing: .2em; text-transform: uppercase;
+      color: var(--gold);
+    }
+    .section-title {
+      font-family: 'Playfair Display', serif;
+      font-size: clamp(1.5rem,2.5vw,2.2rem);
+      font-weight: 700; line-height: 1.1;
+    }
+    .section-rule {
+      flex: 1; height: 1px;
+      background: rgba(255,255,255,.08);
+    }
+
+    /* ── RANKING TABLE ──────────────────────────────────── */
+    .ranking-list { display: grid; gap: 1px; background: rgba(255,255,255,.06); }
+    .rank-item {
+      display: grid;
+      grid-template-columns: 52px 72px 1fr auto;
+      gap: 1.2rem; align-items: center;
+      background: rgba(255,255,255,.03);
+      padding: 1.1rem 1.4rem;
+      cursor: pointer;
+      position: relative; overflow: hidden;
+      transition: background .25s, transform .25s var(--ease);
+    }
+    .rank-item::after {
+      content: ''; position: absolute;
+      left: 0; top: 0; bottom: 0; width: 3px;
+      background: var(--gold);
+      transform: scaleY(0);
+      transition: transform .3s var(--ease);
+    }
+    .rank-item:hover { background: rgba(255,255,255,.07); transform: translateX(4px); }
+    .rank-item:hover::after { transform: scaleY(1); }
+
+    .rank-num {
+      font-family: 'Playfair Display', serif;
+      font-size: 1.9rem; font-weight: 900;
+      color: var(--gold); text-align: center; line-height: 1;
+    }
+    .rank-poster {
+      width: 72px; aspect-ratio: 2/3;
+      object-fit: cover; border-radius: 2px;
+    }
+    .rank-poster-ph {
+      width: 72px; aspect-ratio: 2/3;
+      background: rgba(255,255,255,.05);
+      border-radius: 2px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.4rem;
+    }
+    .rank-info__title {
+      font-family: 'Playfair Display', serif;
+      font-size: 1rem; font-weight: 700;
+      margin-bottom: .3rem; line-height: 1.2;
+    }
+    .rank-info__meta {
+      font-size: .68rem; color: var(--mid);
+      letter-spacing: .04em;
+    }
+    .rank-info__genres {
+      display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .4rem;
+    }
+    .genre-chip {
+      font-size: .58rem; font-weight: 700;
+      letter-spacing: .08em; text-transform: uppercase;
+      padding: .18rem .45rem;
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 2px; color: var(--mid);
+    }
+    .rank-score { text-align: right; }
+    .rank-score__num {
+      font-family: 'Playfair Display', serif;
+      font-size: 1.7rem; font-weight: 900; line-height: 1;
+    }
+    .rank-score__label {
+      font-size: .58rem; color: var(--mid);
+      letter-spacing: .06em; text-transform: uppercase;
+    }
+    .score-bar {
+      width: 44px; height: 3px;
+      background: rgba(255,255,255,.1);
+      margin-top: .4rem; margin-left: auto; border-radius: 2px; overflow: hidden;
+    }
+    .score-bar__fill { height: 100%; border-radius: 2px; }
+
+    /* ── CARD GRID (top20) ──────────────────────────────── */
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 1.2rem;
+    }
+    .movie-card {
+      cursor: pointer; border-radius: 3px;
+      background: #111118; overflow: hidden;
+      position: relative;
+      transition: transform .35s var(--ease), box-shadow .35s;
+    }
+    .movie-card:hover {
+      transform: translateY(-6px);
+      box-shadow: 0 20px 48px rgba(0,0,0,.6);
+    }
+    .movie-card:hover .card-overlay { opacity: 1; }
+    .movie-card:hover .card-poster  { transform: scale(1.06); }
+    .card-poster-wrap { aspect-ratio: 2/3; overflow: hidden; }
+    .card-poster {
+      width: 100%; height: 100%;
+      object-fit: cover;
+      transition: transform .5s var(--ease);
+    }
+    .card-poster-ph {
+      width: 100%; height: 100%;
+      background: #1a1a24;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 2rem; color: rgba(255,255,255,.15);
+    }
+    .card-overlay {
+      position: absolute; inset: 0;
+      background: linear-gradient(180deg, transparent 30%, rgba(12,11,14,.95) 100%);
+      display: flex; flex-direction: column;
+      justify-content: flex-end; padding: .9rem;
+      opacity: 0; transition: opacity .3s;
+    }
+    .card-score {
+      display: inline-flex; align-items: center; gap: .3rem;
+      background: var(--gold); color: var(--ink);
+      font-size: .65rem; font-weight: 700;
+      padding: .2rem .45rem; border-radius: 2px;
+      margin-bottom: .4rem; align-self: flex-start;
+    }
+    .card-title {
+      font-family: 'Playfair Display', serif;
+      font-size: .9rem; font-weight: 700;
+      line-height: 1.2; margin-bottom: .25rem;
+    }
+    .card-year { font-size: .65rem; color: rgba(255,255,255,.45); }
+    .card-num {
+      position: absolute; top: .7rem; left: .7rem;
+      font-family: 'Playfair Display', serif;
+      font-size: .7rem; font-weight: 900;
+      background: var(--ink); color: var(--gold);
+      width: 24px; height: 24px;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 1px;
+    }
+
+    /* ── TRENDING ───────────────────────────────────────── */
+    .trending-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 1rem;
+    }
+    .trending-card {
+      display: grid; grid-template-columns: 56px 1fr;
+      gap: .8rem; align-items: center;
+      background: rgba(255,255,255,.04);
+      border: 1px solid rgba(255,255,255,.07);
+      padding: .8rem; border-radius: 3px;
+      cursor: pointer;
+      transition: background .25s, border-color .25s;
+    }
+    .trending-card:hover {
+      background: rgba(255,255,255,.08);
+      border-color: rgba(201,168,76,.3);
+    }
+    .trending-poster {
+      width: 56px; aspect-ratio: 2/3;
+      object-fit: cover; border-radius: 2px;
+    }
+    .trending-poster-ph {
+      width: 56px; aspect-ratio: 2/3;
+      background: rgba(255,255,255,.05);
+      border-radius: 2px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.1rem;
+    }
+    .trending-info__title {
+      font-size: .85rem; font-weight: 600;
+      line-height: 1.3; margin-bottom: .3rem;
+    }
+    .trending-days {
+      display: inline-flex; align-items: center; gap: .3rem;
+      font-size: .62rem; font-weight: 700;
+      letter-spacing: .08em; text-transform: uppercase;
+      color: var(--gold);
+    }
+    .trending-score {
+      font-size: .68rem; color: var(--mid); margin-top: .2rem;
+    }
+
+    /* ── HISTORY SECTION ────────────────────────────────── */
+    .history-search {
+      display: flex; gap: .8rem; margin-bottom: 2rem;
+      flex-wrap: wrap;
+    }
+    .history-search input {
+      flex: 1; min-width: 200px;
+      background: rgba(255,255,255,.06);
+      border: 1px solid rgba(255,255,255,.12);
+      color: var(--paper); font-family: inherit;
+      font-size: .85rem; padding: .7rem 1rem;
+      border-radius: 3px; outline: none;
+      transition: border-color .2s;
+    }
+    .history-search input::placeholder { color: var(--mid); }
+    .history-search input:focus { border-color: var(--gold); }
+    .history-search button {
+      background: var(--gold); color: var(--ink);
+      border: none; font-family: inherit;
+      font-size: .72rem; font-weight: 700;
+      letter-spacing: .1em; text-transform: uppercase;
+      padding: .7rem 1.4rem; border-radius: 3px;
+      cursor: pointer; transition: opacity .2s;
+    }
+    .history-search button:hover { opacity: .85; }
+
+    .history-result { display: none; }
+    .history-result.show { display: block; }
+
+    .history-movie-header {
+      display: grid; grid-template-columns: 100px 1fr;
+      gap: 1.5rem; margin-bottom: 2rem;
+    }
+    .history-movie-header img {
+      width: 100px; aspect-ratio: 2/3;
+      object-fit: cover; border-radius: 3px;
+    }
+    .history-movie-title {
+      font-family: 'Playfair Display', serif;
+      font-size: clamp(1.2rem,2.5vw,1.8rem);
+      font-weight: 900; margin-bottom: .5rem;
+    }
+    .history-timeline {
+      display: flex; flex-direction: column; gap: .5rem;
+    }
+    .timeline-entry {
+      display: flex; align-items: center; gap: 1rem;
+      background: rgba(255,255,255,.04);
+      border-left: 3px solid rgba(201,168,76,.3);
+      padding: .6rem 1rem; border-radius: 0 3px 3px 0;
+      font-size: .8rem;
+    }
+    .timeline-date {
+      font-weight: 600; color: var(--gold);
+      min-width: 90px; font-size: .75rem;
+    }
+    .timeline-score { color: var(--mid); }
+
+    /* ── SEARCH RESULTS ─────────────────────────────────── */
+    .search-results {
+      display: grid; gap: .5rem; margin-bottom: 1.5rem;
+    }
+    .search-result-item {
+      display: flex; align-items: center; gap: .8rem;
+      background: rgba(255,255,255,.05);
+      padding: .6rem .8rem; border-radius: 3px;
+      cursor: pointer; border: 1px solid transparent;
+      transition: border-color .2s, background .2s;
+    }
+    .search-result-item:hover {
+      border-color: var(--gold);
+      background: rgba(255,255,255,.08);
+    }
+    .search-result-item img {
+      width: 36px; aspect-ratio: 2/3; object-fit: cover; border-radius: 1px;
+    }
+    .search-result-item span { font-size: .82rem; }
+
+    /* ── MODAL ──────────────────────────────────────────── */
+    .modal-backdrop {
+      position: fixed; inset: 0; z-index: 200;
+      background: rgba(5,5,10,.92);
+      display: flex; align-items: center; justify-content: center;
+      padding: 1.5rem;
+      opacity: 0; pointer-events: none;
+      transition: opacity .3s;
+      backdrop-filter: blur(8px);
+    }
+    .modal-backdrop.open { opacity: 1; pointer-events: all; }
+    .modal {
+      background: #13131c;
+      border: 1px solid rgba(255,255,255,.08);
+      max-width: 860px; width: 100%;
+      max-height: 90vh; overflow-y: auto;
+      border-radius: 4px; position: relative;
+      transform: translateY(28px) scale(.97);
+      transition: transform .4s var(--ease);
+    }
+    .modal-backdrop.open .modal { transform: none; }
+
+    .modal__poster-banner {
+      aspect-ratio: 16/6; background: #0a0a12;
+      position: relative; overflow: hidden;
+    }
+    .modal__poster-banner img {
+      width: 100%; height: 100%; object-fit: cover; opacity: .5;
+    }
+    .modal__poster-banner::after {
+      content: ''; position: absolute; inset: 0;
+      background: linear-gradient(180deg, transparent 30%, #13131c 100%);
+    }
+    .modal__close {
+      position: absolute; top: .8rem; right: .8rem;
+      width: 34px; height: 34px;
+      background: rgba(0,0,0,.5);
+      border: 1px solid rgba(255,255,255,.15);
+      border-radius: 50%; color: #fff;
+      font-size: 1rem; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: background .2s; z-index: 2;
+    }
+    .modal__close:hover { background: var(--red); }
+    .modal__body { padding: 1.5rem 2rem 2.5rem; }
+    .modal__top {
+      display: grid; grid-template-columns: 130px 1fr;
+      gap: 1.5rem; margin-top: -65px; position: relative;
+    }
+    .modal__poster {
+      width: 130px; aspect-ratio: 2/3; object-fit: cover;
+      border-radius: 3px; box-shadow: 0 16px 40px rgba(0,0,0,.5);
+    }
+    .modal__poster-ph {
+      width: 130px; aspect-ratio: 2/3;
+      background: rgba(255,255,255,.06); border-radius: 3px;
+      display: flex; align-items: center; justify-content: center; font-size: 2rem;
+    }
+    .modal__info { padding-top: 2rem; }
+    .modal__title {
+      font-family: 'Playfair Display', serif;
+      font-size: clamp(1.3rem,3vw,1.9rem);
+      font-weight: 900; line-height: 1.1; margin-bottom: .6rem;
+    }
+    .modal__score-row {
+      display: flex; align-items: center; gap: 1rem;
+      margin-bottom: .8rem; flex-wrap: wrap;
+    }
+    .modal__score-num {
+      font-family: 'Playfair Display', serif;
+      font-size: 2rem; font-weight: 900; color: var(--gold); line-height: 1;
+    }
+    .modal__score-label {
+      font-size: .62rem; color: var(--mid);
+      letter-spacing: .06em; text-transform: uppercase;
+    }
+    .modal__genres {
+      display: flex; flex-wrap: wrap; gap: .35rem; margin-bottom: 1rem;
+    }
+    .modal__genre-chip {
+      font-size: .62rem; font-weight: 700;
+      letter-spacing: .08em; text-transform: uppercase;
+      padding: .22rem .55rem;
+      border: 1px solid rgba(201,168,76,.4); color: var(--gold);
+      border-radius: 2px;
+    }
+    .modal__overview {
+      font-size: .88rem; line-height: 1.78;
+      color: rgba(255,255,255,.65); margin: 1.2rem 0;
+    }
+    .modal__details {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(150px,1fr));
+      gap: .8rem; padding: 1.1rem;
+      background: rgba(255,255,255,.04);
+      border: 1px solid rgba(255,255,255,.07);
+      border-radius: 3px; margin: 1.5rem 0;
+    }
+    .detail-label {
+      font-size: .58rem; font-weight: 700;
+      letter-spacing: .12em; text-transform: uppercase;
+      color: var(--mid); margin-bottom: .2rem;
+    }
+    .detail-value { font-size: .82rem; font-weight: 500; }
+    .modal__cast-title {
+      font-family: 'Playfair Display', serif;
+      font-size: .95rem; font-weight: 700; margin-bottom: .8rem;
+    }
+    .cast-list { display: flex; flex-wrap: wrap; gap: .5rem; }
+    .cast-chip {
+      display: flex; align-items: center; gap: .5rem;
+      background: rgba(255,255,255,.05);
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: 2px; padding: .4rem .6rem;
+    }
+    .cast-chip img {
+      width: 28px; height: 28px; border-radius: 50%; object-fit: cover;
+    }
+    .cast-chip-ph {
+      width: 28px; height: 28px; border-radius: 50%;
+      background: rgba(255,255,255,.08);
+      display: flex; align-items: center; justify-content: center;
+      font-size: .7rem;
+    }
+    .cast-chip-info { line-height: 1.3; }
+    .cast-chip-name { font-size: .72rem; font-weight: 600; }
+    .cast-chip-char { font-size: .62rem; color: var(--mid); }
+
+    /* ── LOADER & STATES ────────────────────────────────── */
+    .loader {
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      padding: 5rem 2rem; gap: 1rem;
+    }
+    .loader__ring {
+      width: 36px; height: 36px;
+      border: 3px solid rgba(255,255,255,.1);
+      border-top-color: var(--gold);
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loader__text {
+      font-size: .72rem; color: var(--mid);
+      letter-spacing: .1em; text-transform: uppercase;
+    }
+    .empty-state {
+      padding: 4rem 2rem; text-align: center; color: var(--mid);
+      font-size: .85rem;
+    }
+
+    /* ── ANIMATIONS ─────────────────────────────────────── */
+    @keyframes fadeUp {
+      from { opacity:0; transform:translateY(20px); }
+      to   { opacity:1; transform:translateY(0); }
+    }
+    .fade-in {
+      opacity: 0; transform: translateY(16px);
+      transition: opacity .5s, transform .5s var(--ease);
+    }
+    .fade-in.visible { opacity: 1; transform: none; }
+
+    /* ── RESPONSIVE ─────────────────────────────────────── */
+    @media (max-width: 600px) {
+      .rank-item { grid-template-columns: 36px 56px 1fr auto; gap: .7rem; padding: .8rem; }
+      .rank-poster, .rank-poster-ph { width: 56px; }
+      .rank-num { font-size: 1.4rem; }
+      .modal__top { grid-template-columns: 90px 1fr; }
+      .modal__poster, .modal__poster-ph { width: 90px; }
+      .modal__body { padding: 1rem 1.2rem 2rem; }
+      .history-movie-header { grid-template-columns: 70px 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- MASTHEAD -->
+<header class="masthead">
+  <div class="logo">CINE<span>RANK</span></div>
+  <nav class="nav">
+    <a href="#ranking" class="active">Ranking</a>
+    <a href="#top20">Em Cartaz</a>
+    <a href="#trending">Tendências</a>
+    <a href="#historico">Histórico</a>
+  </nav>
+  <div class="date-pill">
+    <label>Data</label>
+    <select id="date-select"><option>Carregando…</option></select>
+  </div>
+</header>
+
+<!-- HERO -->
+<section class="hero" id="hero">
+  <div class="hero__bg" id="hero-bg"></div>
+  <div class="hero__vignette"></div>
+  <div class="hero__content" id="hero-content">
+    <div class="hero__tag">Destaque do dia</div>
+    <h1 class="hero__title" id="hero-title">Carregando…</h1>
+    <div class="hero__meta" id="hero-meta"></div>
+    <p class="hero__overview" id="hero-overview"></p>
+  </div>
+  <div class="hero__dots" id="hero-dots"></div>
+</section>
+
+<!-- RANKING TOP 10 -->
+<section class="section" id="ranking">
+  <div class="section-header">
+    <div>
+      <div class="section-label">Classificação</div>
+      <h2 class="section-title">Top 10 Melhores Avaliados</h2>
+    </div>
+    <div class="section-rule"></div>
+  </div>
+  <div id="ranking-list">
+    <div class="loader"><div class="loader__ring"></div><div class="loader__text">Carregando…</div></div>
+  </div>
+</section>
+
+<!-- TOP 20 GRID -->
+<section class="section" id="top20" style="padding-top:0">
+  <div class="section-header">
+    <div>
+      <div class="section-label">Em cartaz</div>
+      <h2 class="section-title">Os 20 Mais Populares</h2>
+    </div>
+    <div class="section-rule"></div>
+  </div>
+  <div class="card-grid" id="card-grid">
+    <div class="loader" style="grid-column:1/-1"><div class="loader__ring"></div><div class="loader__text">Carregando…</div></div>
+  </div>
+</section>
+
+<!-- TRENDING -->
+<section class="section" id="trending" style="padding-top:0">
+  <div class="section-header">
+    <div>
+      <div class="section-label">Persistência</div>
+      <h2 class="section-title">Há Mais Tempo em Cartaz</h2>
+    </div>
+    <div class="section-rule"></div>
+  </div>
+  <div class="trending-grid" id="trending-grid">
+    <div class="loader" style="grid-column:1/-1"><div class="loader__ring"></div><div class="loader__text">Carregando…</div></div>
+  </div>
+</section>
+
+<!-- HISTÓRICO -->
+<section class="section" id="historico" style="padding-top:0">
+  <div class="section-header">
+    <div>
+      <div class="section-label">Linha do tempo</div>
+      <h2 class="section-title">Histórico de um Filme</h2>
+    </div>
+    <div class="section-rule"></div>
+  </div>
+
+  <div class="history-search">
+    <input type="text" id="history-input" placeholder="Digite o nome do filme…" autocomplete="off" />
+    <button onclick="searchHistory()">Buscar</button>
+  </div>
+  <div class="search-results" id="search-results"></div>
+  <div class="history-result" id="history-result"></div>
+</section>
+
+<!-- MODAL -->
+<div class="modal-backdrop" id="modal-backdrop" onclick="closeModal(event)">
+  <div class="modal" id="modal">
+    <div class="modal__poster-banner">
+      <img id="modal-banner" src="" alt="" onerror="this.style.display='none'" />
+      <button class="modal__close" onclick="closeModalDirect()">✕</button>
+    </div>
+    <div class="modal__body">
+      <div class="modal__top">
+        <div id="modal-poster-wrap"></div>
+        <div class="modal__info">
+          <h2 class="modal__title" id="modal-title"></h2>
+          <div class="modal__score-row">
+            <div>
+              <div class="modal__score-num" id="modal-score"></div>
+              <div class="modal__score-label">Nota dos usuários</div>
+            </div>
+          </div>
+          <div class="modal__genres" id="modal-genres"></div>
+        </div>
+      </div>
+      <p class="modal__overview" id="modal-overview"></p>
+      <div class="modal__details" id="modal-details"></div>
+      <div id="modal-cast"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── CONFIGURAÇÃO ──────────────────────────────────────────
+// ⚠️ Substitua pela URL da sua Web App do Apps Script
+const API = 'https://script.google.com/macros/s/AKfycbxnq0OcYmMbs70VPbaRv2oEELh9tedda6bvcWKH_HNL4mNbDtEJX_5ZnDheSXr8y9y-MQ/exec';
+
+// ── ESTADO ────────────────────────────────────────────────
+let allMovies    = [];   // filmes do dia selecionado
+let heroMovies   = [];
+let heroIdx      = 0;
+let heroTimer    = null;
+let selectedDate = '';
+
+// ── UTILS ─────────────────────────────────────────────────
+const $  = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+function scoreColor(s) {
+  if (!s) return 'var(--mid)';
+  if (s >= 8) return '#2a9d5c';
+  if (s >= 6) return 'var(--gold)';
+  return 'var(--red)';
+}
+
+function formatRuntime(m) {
+  if (!m) return '—';
+  return `${Math.floor(m/60)}h ${m%60}m`;
+}
+
+function formatDate(d) {
+  if (!d) return '—';
+  // YYYY-MM-DD → DD/MM/YYYY
+  if (/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+    const [y,mo,dy] = d.split('-');
+    return `${dy}/${mo}/${y}`;
+  }
+  return d;
+}
+
+async function api(params) {
+  const url = API + '?' + new URLSearchParams(params);
+  const res = await fetch(url);
+  return res.json();
+}
+
+// ── INTERSECTION OBSERVER (fade-in) ───────────────────────
+const io = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) { e.target.classList.add('visible'); io.unobserve(e.target); }
+  });
+}, { threshold: 0.08 });
+
+function observeAll() {
+  document.querySelectorAll('.fade-in:not(.visible)').forEach(el => io.observe(el));
+}
+
+// ── NAV ACTIVE ────────────────────────────────────────────
+const sections = ['ranking','top20','trending','historico'];
+window.addEventListener('scroll', () => {
+  let current = '';
+  sections.forEach(id => {
+    const el = $(id);
+    if (el && el.getBoundingClientRect().top < 120) current = id;
+  });
+  document.querySelectorAll('.nav a').forEach(a => {
+    a.classList.toggle('active', a.getAttribute('href') === '#' + current);
+  });
+});
+
+// ── HERO ──────────────────────────────────────────────────
+function setHero(movie) {
+  const bg = $('hero-bg');
+  if (movie.poster_path) {
+    bg.style.backgroundImage = `url('${movie.poster_path}')`;
+    bg.classList.add('loaded');
+  }
+  $('hero-title').textContent = movie.title || '—';
+
+  const meta = $('hero-meta');
+  meta.innerHTML = '';
+  if (movie.vote_average) {
+    meta.innerHTML += `<div class="score-badge" style="background:${scoreColor(movie.vote_average)}">★ ${movie.vote_average}</div>`;
+  }
+  if (movie.genres) {
+    meta.innerHTML += `<div class="hero__genre">${movie.genres.split(',').slice(0,3).join(' · ')}</div>`;
+  }
+  if (movie.release_date) {
+    const y = String(movie.release_date).slice(0,4);
+    if (y) meta.innerHTML += `<div class="hero__genre">${y}</div>`;
+  }
+  $('hero-overview').textContent = movie.overview || '';
+}
+
+function buildDots(movies) {
+  const dots = $('hero-dots');
+  dots.innerHTML = movies.map((_, i) =>
+    `<div class="hero__dot${i===0?' active':''}" onclick="goHero(${i})"></div>`
+  ).join('');
+}
+
+function goHero(idx) {
+  heroIdx = idx;
+  setHero(heroMovies[idx]);
+  document.querySelectorAll('.hero__dot').forEach((d,i) => d.classList.toggle('active', i===idx));
+}
+
+function startHeroRotation() {
+  if (heroTimer) clearInterval(heroTimer);
+  heroTimer = setInterval(() => goHero((heroIdx+1) % heroMovies.length), 6000);
+}
+
+// ── RANKING ───────────────────────────────────────────────
+function renderRanking(movies) {
+  const el = $('ranking-list');
+  if (!movies.length) { el.innerHTML = '<div class="empty-state">Nenhum dado para esta data.</div>'; return; }
+
+  el.innerHTML = `<div class="ranking-list">${
+    movies.slice(0,10).map((m,i) => {
+      const pct = m.vote_average ? (m.vote_average/10*100).toFixed(0) : 0;
+      const color = scoreColor(m.vote_average);
+      const poster = m.poster_path
+        ? `<img class="rank-poster" src="${m.poster_path}" alt="${m.title}" loading="lazy" onerror="this.outerHTML='<div class=rank-poster-ph>🎬</div>'">`
+        : `<div class="rank-poster-ph">🎬</div>`;
+      const genres = m.genres ? m.genres.split(',').slice(0,2).map(g =>
+        `<span class="genre-chip">${g.trim()}</span>`).join('') : '';
+      return `
+        <div class="rank-item fade-in" style="transition-delay:${i*50}ms" onclick="openModal(allMovies[${allMovies.indexOf(m)}])">
+          <div class="rank-num">${i+1}</div>
+          ${poster}
+          <div class="rank-info">
+            <div class="rank-info__title">${m.title||'—'}</div>
+            <div class="rank-info__meta">${m.release_date?String(m.release_date).slice(0,4):''}${m.runtime?' · '+formatRuntime(m.runtime):''}${m.director?' · '+m.director:''}</div>
+            <div class="rank-info__genres">${genres}</div>
+          </div>
+          <div class="rank-score">
+            <div class="rank-score__num" style="color:${color}">${m.vote_average||'—'}</div>
+            <div class="rank-score__label">/ 10</div>
+            <div class="score-bar"><div class="score-bar__fill" style="width:${pct}%;background:${color}"></div></div>
+          </div>
+        </div>`;
+    }).join('')
+  }</div>`;
+  observeAll();
+}
+
+// ── TOP 20 GRID ───────────────────────────────────────────
+function renderGrid(movies) {
+  const el = $('card-grid');
+  if (!movies.length) { el.innerHTML = '<div class="empty-state" style="grid-column:1/-1">Nenhum dado para esta data.</div>'; return; }
+
+  el.innerHTML = movies.slice(0,20).map((m,i) => {
+    const poster = m.poster_path
+      ? `<img class="card-poster" src="${m.poster_path}" alt="${m.title}" loading="lazy" onerror="this.outerHTML='<div class=card-poster-ph>🎬</div>'">`
+      : `<div class="card-poster-ph">🎬</div>`;
+    return `
+      <div class="movie-card fade-in" style="transition-delay:${i*35}ms" onclick="openModal(allMovies[${allMovies.indexOf(m)}])">
+        <div class="card-poster-wrap">${poster}</div>
+        <div class="card-num">${i+1}</div>
+        <div class="card-overlay">
+          ${m.vote_average?`<div class="card-score">★ ${m.vote_average}</div>`:''}
+          <div class="card-title">${m.title||'—'}</div>
+          <div class="card-year">${m.release_date?String(m.release_date).slice(0,4):''}</div>
+        </div>
+      </div>`;
+  }).join('');
+  observeAll();
+}
+
+// ── TRENDING ──────────────────────────────────────────────
+function renderTrending(items) {
+  const el = $('trending-grid');
+  if (!items.length) { el.innerHTML = '<div class="empty-state" style="grid-column:1/-1">Dados insuficientes para calcular tendências.</div>'; return; }
+
+  el.innerHTML = items.map((m,i) => {
+    const poster = m.poster_path
+      ? `<img class="trending-poster" src="${m.poster_path}" loading="lazy" onerror="this.outerHTML='<div class=trending-poster-ph>🎬</div>'">`
+      : `<div class="trending-poster-ph">🎬</div>`;
+    return `
+      <div class="trending-card fade-in" style="transition-delay:${i*30}ms" onclick="openModalById(${m.id})">
+        ${poster}
+        <div>
+          <div class="trending-info__title">${m.title||'—'}</div>
+          <div class="trending-days">🎬 ${m.days_in_theaters} dia${m.days_in_theaters>1?'s':''} em cartaz</div>
+          ${m.vote_average?`<div class="trending-score">★ ${m.vote_average}</div>`:''}
+        </div>
+      </div>`;
+  }).join('');
+  observeAll();
+}
+
+// ── HISTORY ───────────────────────────────────────────────
+let cachedMovies = []; // cache local para busca por nome
+
+function searchHistory() {
+  const q = $('history-input').value.trim().toLowerCase();
+  if (!q) return;
+
+  const results = cachedMovies.filter(m => m.title && m.title.toLowerCase().includes(q));
+  const unique = [...new Map(results.map(m => [m.id, m])).values()];
+
+  const el = $('search-results');
+  if (!unique.length) {
+    el.innerHTML = '<div class="empty-state">Nenhum filme encontrado.</div>';
+    return;
+  }
+
+  el.innerHTML = unique.slice(0,8).map(m => {
+    const img = m.poster_path
+      ? `<img src="${m.poster_path}" loading="lazy" onerror="this.style.display='none'">`
+      : '';
+    return `
+      <div class="search-result-item" onclick="loadHistory(${m.id},'${(m.title||'').replace(/'/g,"\\'")}','${m.poster_path||''}')">
+        ${img}<span>${m.title}</span>
+      </div>`;
+  }).join('');
+}
+
+$('history-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') searchHistory();
+});
+
+async function loadHistory(id, title, poster) {
+  $('search-results').innerHTML = '';
+  const result = $('history-result');
+  result.innerHTML = '<div class="loader"><div class="loader__ring"></div><div class="loader__text">Buscando histórico…</div></div>';
+  result.classList.add('show');
+
+  try {
+    const data = await api({ action: 'history', id });
+    const entries = data.history || [];
+
+    const posterHtml = poster
+      ? `<img src="${poster}" loading="lazy" onerror="this.style.display='none'">`
+      : '<div style="width:100px;aspect-ratio:2/3;background:rgba(255,255,255,.05);border-radius:3px;display:flex;align-items:center;justify-content:center">🎬</div>';
+
+    result.innerHTML = `
+      <div class="history-movie-header">
+        ${posterHtml}
+        <div>
+          <div class="history-movie-title">${title}</div>
+          <div style="color:var(--mid);font-size:.8rem">${entries.length} registro${entries.length!==1?'s':''} encontrado${entries.length!==1?'s':''}</div>
+        </div>
+      </div>
+      <div class="history-timeline">
+        ${entries.map(e => `
+          <div class="timeline-entry">
+            <div class="timeline-date">${formatDate(e.date)}</div>
+            <div class="timeline-score">${e.vote_average?'★ '+e.vote_average:'Sem nota'}</div>
+            <div style="font-size:.75rem;color:var(--mid)">${e.status||''}</div>
+          </div>
+        `).join('') || '<div class="empty-state">Sem registros históricos.</div>'}
+      </div>`;
+  } catch(err) {
+    result.innerHTML = '<div class="empty-state">Erro ao buscar histórico.</div>';
+  }
+}
+
+async function openModalById(id) {
+  const movie = allMovies.find(m => m.id == id) || cachedMovies.find(m => m.id == id);
+  if (movie) openModal(movie);
+}
+
+// ── MODAL ─────────────────────────────────────────────────
+function openModal(m) {
+  if (!m) return;
+
+  // Banner (usa poster como banner já que não temos backdrop)
+  const banner = $('modal-banner');
+  banner.src = m.poster_path || '';
+
+  // Poster
+  const pw = $('modal-poster-wrap');
+  pw.innerHTML = m.poster_path
+    ? `<img class="modal__poster" src="${m.poster_path}" alt="${m.title}" onerror="this.outerHTML='<div class=modal__poster-ph>🎬</div>'">`
+    : `<div class="modal__poster-ph">🎬</div>`;
+
+  $('modal-title').textContent = m.title || '—';
+
+  const score = m.vote_average;
+  $('modal-score').textContent = score || '—';
+  $('modal-score').style.color = scoreColor(score);
+
+  $('modal-genres').innerHTML = (m.genres||'').split(',').filter(Boolean).map(g =>
+    `<span class="modal__genre-chip">${g.trim()}</span>`).join('');
+
+  $('modal-overview').textContent = m.overview || 'Sinopse não disponível.';
+
+  const details = [
+    { label:'Lançamento',  value: formatDate(m.release_date) },
+    { label:'Duração',     value: formatRuntime(m.runtime) },
+    { label:'Idioma',      value: m.original_language || '—' },
+    { label:'Status',      value: m.status || '—' },
+    { label:'Diretor',     value: m.director || '—' },
+    { label:'Roteiro',     value: m.screenplay || '—' },
+  ];
+  $('modal-details').innerHTML = details.map(d =>
+    `<div><div class="detail-label">${d.label}</div><div class="detail-value">${d.value}</div></div>`
+  ).join('');
+
+  // Cast
+  const castEl = $('modal-cast');
+  const castNames = (m.cast||'').split(',').map(n=>n.trim()).filter(Boolean);
+  if (castNames.length) {
+    castEl.innerHTML = `
+      <div class="modal__cast-title">Elenco Principal</div>
+      <div class="cast-list">${castNames.slice(0,10).map(name => `
+        <div class="cast-chip">
+          <div class="cast-chip-ph">👤</div>
+          <div class="cast-chip-info">
+            <div class="cast-chip-name">${name}</div>
+          </div>
+        </div>`).join('')}
+      </div>`;
+  } else {
+    castEl.innerHTML = '';
+  }
+
+  $('modal-backdrop').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeModal(e) { if (e.target === $('modal-backdrop')) closeModalDirect(); }
+function closeModalDirect() {
+  $('modal-backdrop').classList.remove('open');
+  document.body.style.overflow = '';
+}
+document.addEventListener('keydown', e => { if (e.key==='Escape') closeModalDirect(); });
+
+// ── DATE SELECTOR ─────────────────────────────────────────
+async function loadDates() {
+  const data = await api({ action: 'dates' });
+  const dates = data.dates || [];
+
+  const sel = $('date-select');
+  if (!dates.length) {
+    sel.innerHTML = '<option>Sem dados</option>';
+    return;
+  }
+
+  sel.innerHTML = dates.map(d =>
+    `<option value="${d}">${formatDate(d)}</option>`
+  ).join('');
+
+  selectedDate = dates[0];
+  sel.addEventListener('change', () => {
+    selectedDate = sel.value;
+    loadDayData(selectedDate);
+  });
+
+  await loadDayData(selectedDate);
+}
+
+async function loadDayData(date) {
+  // Ranking e top20 em paralelo
+  const [rankData, top20Data] = await Promise.all([
+    api({ action: 'ranking', date }),
+    api({ action: 'top20',   date }),
+  ]);
+
+  const ranking = rankData.ranking || [];
+  const top20   = top20Data.movies  || [];
+
+  // Merge para ter todos os filmes do dia disponíveis para modal e busca
+  const merged = [...ranking, ...top20];
+  const seen   = new Set();
+  allMovies    = merged.filter(m => { if (seen.has(m.id)) return false; seen.add(m.id); return true; });
+
+  // Cache para busca histórica
+  allMovies.forEach(m => {
+    if (!cachedMovies.find(c => c.id === m.id)) cachedMovies.push(m);
+  });
+
+  // Hero com top 5
+  heroMovies = ranking.filter(m => m.poster_path).slice(0, 5);
+  if (heroMovies.length) {
+    goHero(0);
+    buildDots(heroMovies);
+    startHeroRotation();
+  }
+
+  renderRanking(ranking);
+  renderGrid(top20);
+}
+
+// ── INIT ──────────────────────────────────────────────────
+async function init() {
+  await loadDates();
+
+  // Trending não depende de data
+  const trendData = await api({ action: 'trending' });
+  renderTrending(trendData.trending || []);
+}
+
+init().catch(console.error);
+</script>
+</body>
+</html>
