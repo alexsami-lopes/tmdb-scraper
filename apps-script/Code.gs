@@ -303,7 +303,28 @@ function logRun(run) {
   ]);
 }
 
-// ─── FUNÇÕES DE LEITURA ───────────────────────────────────────────────────────
+// ─── FUNÇÕES DE LEITURA ─────────────────────────────────────────────────────
+
+/**
+ * Normaliza qualquer formato de data para YYYY-MM-DD.
+ * Trata: Date objects, ISO strings (2026-03-27T03:00:00.000Z), YYYY-MM-DD, DD/MM/YYYY.
+ */
+function normalizeDate(val) {
+  if (!val) return '';
+  // Date object do Sheets
+  if (val instanceof Date) {
+    return Utilities.formatDate(val, 'America/Sao_Paulo', 'yyyy-MM-dd');
+  }
+  const s = String(val).trim();
+  // ISO com T: 2026-03-27T03:00:00.000Z
+  if (s.includes('T')) return s.slice(0, 10);
+  // Já no formato YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  // DD/MM/YYYY
+  const dmy = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (dmy) return dmy[3] + '-' + dmy[2] + '-' + dmy[1];
+  return s;
+}──
 
 /**
  * Retorna o total de linhas de dados na aba "filmes" (excluindo cabeçalho).
@@ -322,14 +343,19 @@ function getMoviesByDate(date) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_MOVIES);
   if (!sheet || sheet.getLastRow() <= 1) return [];
 
-  const data = sheet.getDataRange().getValues();
-  const head = data[0];
+  const data    = sheet.getDataRange().getValues();
+  const head    = data[0];
   const dateIdx = head.indexOf('date');
+  const target  = normalizeDate(date);
 
   return data
-    .slice(1) // pula cabeçalho
-    .filter(row => row[dateIdx] === date)
-    .map(row => rowToMovie(row, head));
+    .slice(1)
+    .filter(row => normalizeDate(row[dateIdx]) === target)
+    .map(row => {
+      const obj = rowToMovie(row, head);
+      obj.date  = normalizeDate(obj.date);
+      return obj;
+    });
 }
 
 /**
@@ -341,9 +367,13 @@ function getAvailableDates() {
 
   const data    = sheet.getDataRange().getValues();
   const dateIdx = data[0].indexOf('date');
-  const dates   = new Set(data.slice(1).map(row => row[dateIdx]));
+  const dates   = new Set(
+    data.slice(1)
+        .map(row => normalizeDate(row[dateIdx]))
+        .filter(Boolean)
+  );
 
-  return [...dates].filter(Boolean).sort().reverse();
+  return [...dates].sort().reverse();
 }
 
 /**
@@ -360,7 +390,11 @@ function getMovieHistory(id) {
   return data
     .slice(1)
     .filter(row => String(row[idIdx]) === String(id))
-    .map(row => rowToMovie(row, head));
+    .map(row => {
+      const obj = rowToMovie(row, head);
+      obj.date  = normalizeDate(obj.date);
+      return obj;
+    });
 }
 
 /**
