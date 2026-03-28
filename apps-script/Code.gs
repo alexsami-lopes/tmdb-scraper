@@ -207,6 +207,20 @@ function doGet(e) {
       case 'runs':
         return jsonResponse({ status: 'ok', runs: getRunsLog() });
 
+      // Elenco de um filme pelo ID (com fotos)
+      case 'cast': {
+        const id = parseInt(params.id);
+        if (!id) return jsonResponse({ status: 'error', message: 'id obrigatório' });
+        return jsonResponse({ status: 'ok', id, cast: getMovieCast(id) });
+      }
+
+      // Busca filmes por nome (para o histórico)
+      case 'search': {
+        const q = (params.q || '').toLowerCase().trim();
+        if (!q) return jsonResponse({ status: 'error', message: 'q obrigatório' });
+        return jsonResponse({ status: 'ok', results: searchMovies(q) });
+      }
+
       default:
         return jsonResponse({ status: 'error', message: 'Ação desconhecida: ' + action });
     }
@@ -450,6 +464,66 @@ function getRunsLog() {
     head.forEach((col, i) => { obj[col] = row[i]; });
     return obj;
   }).reverse(); // mais recente primeiro
+}
+
+/**
+ * Retorna o elenco de um filme pelo ID a partir da aba "elenco".
+ * Inclui name, character e photo_url.
+ */
+function getMovieCast(id) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_CAST);
+  if (!sheet || sheet.getLastRow() <= 1) return [];
+
+  const data     = sheet.getDataRange().getValues();
+  const head     = data[0];
+  const idIdx    = head.indexOf('movie_id');
+  const nameIdx  = head.indexOf('actor_name');
+  const charIdx  = head.indexOf('character');
+  const photoIdx = head.indexOf('photo_url');
+
+  return data
+    .slice(1)
+    .filter(row => String(row[idIdx]) === String(id))
+    .map(row => ({
+      name:      row[nameIdx]  || '',
+      character: row[charIdx]  || '',
+      photo_url: row[photoIdx] || '',
+    }))
+    // Remove duplicates by name (keep first occurrence)
+    .filter((actor, idx, arr) => arr.findIndex(a => a.name === actor.name) === idx);
+}
+
+/**
+ * Busca filmes por nome na aba "filmes".
+ * Retorna resultados únicos por ID (o mais recente de cada filme).
+ */
+function searchMovies(q) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_MOVIES);
+  if (!sheet || sheet.getLastRow() <= 1) return [];
+
+  const data      = sheet.getDataRange().getValues();
+  const head      = data[0];
+  const titleIdx  = head.indexOf('title');
+  const idIdx     = head.indexOf('id');
+  const posterIdx = head.indexOf('poster_path');
+
+  const seen    = new Set();
+  const results = [];
+
+  data.slice(1).forEach(row => {
+    const title = String(row[titleIdx] || '').toLowerCase();
+    if (!title.includes(q)) return;
+    const id = String(row[idIdx]);
+    if (seen.has(id)) return;
+    seen.add(id);
+    results.push({
+      id:          row[idIdx],
+      title:       row[titleIdx],
+      poster_path: row[posterIdx] || '',
+    });
+  });
+
+  return results.slice(0, 10);
 }
 
 // ─── UTILITÁRIOS ─────────────────────────────────────────────────────────────

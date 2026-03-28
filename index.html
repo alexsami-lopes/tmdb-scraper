@@ -474,56 +474,46 @@
       opacity: 0; pointer-events: none;
       transition: opacity .3s;
       backdrop-filter: blur(8px);
+      overflow-y: auto;
     }
     .modal-backdrop.open { opacity: 1; pointer-events: all; }
     .modal {
       background: #13131c;
       border: 1px solid rgba(255,255,255,.08);
-      max-width: 860px; width: 100%;
-      max-height: 90vh; overflow-y: auto;
+      max-width: 800px; width: 100%;
       border-radius: 4px; position: relative;
       transform: translateY(28px) scale(.97);
       transition: transform .4s var(--ease);
+      overflow: hidden;
+      /* No scrollbar on modal itself — backdrop scrolls */
     }
     .modal-backdrop.open .modal { transform: none; }
-
-    .modal__poster-banner {
-      aspect-ratio: 16/6; background: #0a0a12;
-      position: relative; overflow: hidden;
-    }
-    .modal__poster-banner img {
-      width: 100%; height: 100%; object-fit: cover; opacity: .5;
-    }
-    .modal__poster-banner::after {
-      content: ''; position: absolute; inset: 0;
-      background: linear-gradient(180deg, transparent 30%, #13131c 100%);
-    }
     .modal__close {
       position: absolute; top: .8rem; right: .8rem;
       width: 34px; height: 34px;
-      background: rgba(0,0,0,.5);
+      background: rgba(0,0,0,.6);
       border: 1px solid rgba(255,255,255,.15);
       border-radius: 50%; color: #fff;
       font-size: 1rem; cursor: pointer;
       display: flex; align-items: center; justify-content: center;
-      transition: background .2s; z-index: 2;
+      transition: background .2s; z-index: 10;
     }
     .modal__close:hover { background: var(--red); }
-    .modal__body { padding: 1.5rem 2rem 2.5rem; }
+    .modal__body { padding: 1.5rem 2rem 2rem; }
     .modal__top {
-      display: grid; grid-template-columns: 130px 1fr;
-      gap: 1.5rem; margin-top: -65px; position: relative;
+      display: grid; grid-template-columns: 110px 1fr;
+      gap: 1.2rem; align-items: start;
     }
     .modal__poster {
-      width: 130px; aspect-ratio: 2/3; object-fit: cover;
-      border-radius: 3px; box-shadow: 0 16px 40px rgba(0,0,0,.5);
+      width: 110px; aspect-ratio: 2/3; object-fit: cover;
+      border-radius: 3px; box-shadow: 0 8px 24px rgba(0,0,0,.5);
     }
     .modal__poster-ph {
-      width: 130px; aspect-ratio: 2/3;
+      width: 110px; aspect-ratio: 2/3;
       background: rgba(255,255,255,.06); border-radius: 3px;
       display: flex; align-items: center; justify-content: center; font-size: 2rem;
     }
-    .modal__info { padding-top: 2rem; }
+    .modal__info { padding-top: 0; }
     .modal__title {
       font-family: 'Playfair Display', serif;
       font-size: clamp(1.3rem,3vw,1.9rem);
@@ -732,10 +722,7 @@
 <!-- MODAL -->
 <div class="modal-backdrop" id="modal-backdrop" onclick="closeModal(event)">
   <div class="modal" id="modal">
-    <div class="modal__poster-banner">
-      <img id="modal-banner" src="" alt="" onerror="this.style.display='none'" />
-      <button class="modal__close" onclick="closeModalDirect()">✕</button>
-    </div>
+    <button class="modal__close" onclick="closeModalDirect()">✕</button>
     <div class="modal__body">
       <div class="modal__top">
         <div id="modal-poster-wrap"></div>
@@ -959,28 +946,36 @@ function renderTrending(items) {
 // ── HISTORY ───────────────────────────────────────────────
 let cachedMovies = []; // cache local para busca por nome
 
-function searchHistory() {
-  const q = $('history-input').value.trim().toLowerCase();
+async function searchHistory() {
+  const q = $('history-input').value.trim();
   if (!q) return;
 
-  const results = cachedMovies.filter(m => m.title && m.title.toLowerCase().includes(q));
-  const unique = [...new Map(results.map(m => [m.id, m])).values()];
-
   const el = $('search-results');
-  if (!unique.length) {
-    el.innerHTML = '<div class="empty-state">Nenhum filme encontrado.</div>';
-    return;
-  }
+  el.innerHTML = '<div class="empty-state">Buscando…</div>';
 
-  el.innerHTML = unique.slice(0,8).map(m => {
-    const img = m.poster_path
-      ? `<img src="${m.poster_path}" loading="lazy" onerror="this.style.display='none'">`
-      : '';
-    return `
-      <div class="search-result-item" onclick="loadHistory(${m.id},'${(m.title||'').replace(/'/g,"\\'")}','${m.poster_path||''}')">
-        ${img}<span>${m.title}</span>
-      </div>`;
-  }).join('');
+  try {
+    const data = await api({ action: 'search', q });
+    const results = data.results || [];
+
+    if (!results.length) {
+      el.innerHTML = '<div class="empty-state">Nenhum filme encontrado.</div>';
+      return;
+    }
+
+    el.innerHTML = results.map(m => {
+      const img = m.poster_path
+        ? `<img src="${m.poster_path}" loading="lazy" onerror="this.style.display='none'">`
+        : '';
+      const safeTitle = (m.title||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+      const safePoster = (m.poster_path||'').replace(/'/g,"\\'");
+      return `
+        <div class="search-result-item" onclick="loadHistory(${m.id},'${safeTitle}','${safePoster}')">
+          ${img}<span>${m.title}</span>
+        </div>`;
+    }).join('');
+  } catch(e) {
+    el.innerHTML = '<div class="empty-state">Erro ao buscar. Tente novamente.</div>';
+  }
 }
 
 $('history-input').addEventListener('keydown', e => {
@@ -1040,12 +1035,8 @@ async function openModalById(id) {
 }
 
 // ── MODAL ─────────────────────────────────────────────────
-function openModal(m) {
+async function openModal(m) {
   if (!m) return;
-
-  // Banner (usa poster como banner já que não temos backdrop)
-  const banner = $('modal-banner');
-  banner.src = m.poster_path || '';
 
   // Poster
   const pw = $('modal-poster-wrap');
@@ -1065,7 +1056,7 @@ function openModal(m) {
   $('modal-overview').textContent = m.overview || 'Sinopse não disponível.';
 
   const details = [
-    { label:'Lançamento',  value: formatDate(m.release_date) },
+    { label:'Lançamento',  value: formatDate(normalizeDate(m.release_date)) },
     { label:'Duração',     value: formatRuntime(m.runtime) },
     { label:'Idioma',      value: m.original_language || '—' },
     { label:'Status',      value: m.status || '—' },
@@ -1076,32 +1067,59 @@ function openModal(m) {
     `<div><div class="detail-label">${d.label}</div><div class="detail-value">${d.value}</div></div>`
   ).join('');
 
-  // Cast
+  // Cast — placeholder enquanto busca
   const castEl = $('modal-cast');
   const castNames = (m.cast||'').split(',').map(n=>n.trim()).filter(Boolean);
   if (castNames.length) {
     castEl.innerHTML = `
       <div class="modal__cast-title">Elenco Principal</div>
-      <div class="cast-list">${castNames.slice(0,10).map(name => `
-        <div class="cast-chip">
-          <div class="cast-chip-ph">👤</div>
-          <div class="cast-chip-info">
-            <div class="cast-chip-name">${name}</div>
-          </div>
-        </div>`).join('')}
+      <div class="cast-list" id="cast-list-inner">
+        ${castNames.slice(0,10).map(name => `
+          <div class="cast-chip">
+            <div class="cast-chip-ph">👤</div>
+            <div class="cast-chip-info"><div class="cast-chip-name">${name}</div></div>
+          </div>`).join('')}
       </div>`;
   } else {
     castEl.innerHTML = '';
   }
 
   $('modal-backdrop').classList.add('open');
-  document.body.style.overflow = 'hidden';
+  // Don't lock body scroll — backdrop itself scrolls if needed
+
+  // Busca fotos dos atores via API em background
+  if (m.id && castNames.length) {
+    try {
+      const data = await api({ action: 'cast', id: m.id });
+      const actors = data.cast || [];
+      if (!actors.length) return;
+
+      const listEl = document.getElementById('cast-list-inner');
+      if (!listEl) return;
+
+      listEl.innerHTML = castNames.slice(0,10).map(name => {
+        const actor = actors.find(a => a.name === name);
+        const photo = actor && actor.photo_url;
+        const photoHtml = photo
+          ? `<img src="${photo}" onerror="this.outerHTML='<div class=cast-chip-ph>👤</div>'">`
+          : `<div class="cast-chip-ph">👤</div>`;
+        const char = actor && actor.character ? `<div class="cast-chip-char">${actor.character}</div>` : '';
+        return `
+          <div class="cast-chip">
+            ${photoHtml}
+            <div class="cast-chip-info">
+              <div class="cast-chip-name">${name}</div>
+              ${char}
+            </div>
+          </div>`;
+      }).join('');
+    } catch(e) { /* mantém o placeholder */ }
+  }
 }
 
 function closeModal(e) { if (e.target === $('modal-backdrop')) closeModalDirect(); }
 function closeModalDirect() {
   $('modal-backdrop').classList.remove('open');
-  document.body.style.overflow = '';
 }
 document.addEventListener('keydown', e => { if (e.key==='Escape') closeModalDirect(); });
 
