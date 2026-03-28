@@ -784,12 +784,15 @@ function normalizeDate(d) {
 
 function formatDate(d) {
   if (!d) return '—';
-  const n = normalizeDate(String(d));
+  const s = String(d).trim();
+  // Already DD/MM/YYYY
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) return s;
+  const n = normalizeDate(s);
   if (/^\d{4}-\d{2}-\d{2}$/.test(n)) {
     const [y,mo,dy] = n.split('-');
     return `${dy}/${mo}/${y}`;
   }
-  return d;
+  return s;
 }
 
 async function api(params) {
@@ -879,7 +882,7 @@ function renderRanking(movies) {
       const genres = m.genres ? m.genres.split(',').slice(0,2).map(g =>
         `<span class="genre-chip">${g.trim()}</span>`).join('') : '';
       return `
-        <div class="rank-item fade-in" style="transition-delay:${i*50}ms" onclick="openModal(allMovies[${allMovies.indexOf(m)}])">
+        <div class="rank-item fade-in" style="transition-delay:${i*50}ms" onclick="openModalById(${m.id})">
           <div class="rank-num">${i+1}</div>
           ${poster}
           <div class="rank-info">
@@ -908,7 +911,7 @@ function renderGrid(movies) {
       ? `<img class="card-poster" src="${m.poster_path}" alt="${m.title}" loading="lazy" onerror="this.outerHTML='<div class=card-poster-ph>🎬</div>'">`
       : `<div class="card-poster-ph">🎬</div>`;
     return `
-      <div class="movie-card fade-in" style="transition-delay:${i*35}ms" onclick="openModal(allMovies[${allMovies.indexOf(m)}])">
+      <div class="movie-card fade-in" style="transition-delay:${i*35}ms" onclick="openModalById(${m.id})">
         <div class="card-poster-wrap">${poster}</div>
         <div class="card-num">${i+1}</div>
         <div class="card-overlay">
@@ -980,6 +983,14 @@ async function searchHistory() {
 
 $('history-input').addEventListener('keydown', e => {
   if (e.key === 'Enter') searchHistory();
+});
+$('history-input').addEventListener('input', e => {
+  if (!e.target.value.trim()) {
+    $('search-results').innerHTML = '';
+    const result = $('history-result');
+    result.innerHTML = '';
+    result.classList.remove('show');
+  }
 });
 
 async function loadHistory(id, title, poster) {
@@ -1067,45 +1078,43 @@ async function openModal(m) {
     `<div><div class="detail-label">${d.label}</div><div class="detail-value">${d.value}</div></div>`
   ).join('');
 
-  // Cast — placeholder enquanto busca
+  // Cast — spinner enquanto busca fotos
   const castEl = $('modal-cast');
   const castNames = (m.cast||'').split(',').map(n=>n.trim()).filter(Boolean);
+
   if (castNames.length) {
     castEl.innerHTML = `
       <div class="modal__cast-title">Elenco Principal</div>
-      <div class="cast-list" id="cast-list-inner">
-        ${castNames.slice(0,10).map(name => `
-          <div class="cast-chip">
-            <div class="cast-chip-ph">👤</div>
-            <div class="cast-chip-info"><div class="cast-chip-name">${name}</div></div>
-          </div>`).join('')}
+      <div class="loader" id="cast-loader" style="padding:1.5rem 0">
+        <div class="loader__ring"></div>
+        <div class="loader__text">Carregando elenco…</div>
       </div>`;
   } else {
     castEl.innerHTML = '';
   }
 
   $('modal-backdrop').classList.add('open');
-  // Don't lock body scroll — backdrop itself scrolls if needed
 
-  // Busca fotos dos atores via API em background
+  // Busca fotos dos atores via API
   if (m.id && castNames.length) {
     try {
       const data = await api({ action: 'cast', id: m.id });
       const actors = data.cast || [];
-      if (!actors.length) return;
 
-      const listEl = document.getElementById('cast-list-inner');
-      if (!listEl) return;
+      const castLoader = document.getElementById('cast-loader');
+      if (!castLoader) return;
 
-      listEl.innerHTML = castNames.slice(0,10).map(name => {
+      // Substitui spinner pela lista com fade-in
+      const listHtml = castNames.slice(0,10).map(name => {
         const actor = actors.find(a => a.name === name);
         const photo = actor && actor.photo_url;
         const photoHtml = photo
           ? `<img src="${photo}" onerror="this.outerHTML='<div class=cast-chip-ph>👤</div>'">`
           : `<div class="cast-chip-ph">👤</div>`;
-        const char = actor && actor.character ? `<div class="cast-chip-char">${actor.character}</div>` : '';
+        const char = actor && actor.character
+          ? `<div class="cast-chip-char">${actor.character}</div>` : '';
         return `
-          <div class="cast-chip">
+          <div class="cast-chip fade-in">
             ${photoHtml}
             <div class="cast-chip-info">
               <div class="cast-chip-name">${name}</div>
@@ -1113,7 +1122,21 @@ async function openModal(m) {
             </div>
           </div>`;
       }).join('');
-    } catch(e) { /* mantém o placeholder */ }
+
+      castLoader.outerHTML = `<div class="cast-list">${listHtml}</div>`;
+      // Trigger fade-in
+      requestAnimationFrame(() => observeAll());
+    } catch(e) {
+      const loader = document.getElementById('cast-loader');
+      if (loader) loader.outerHTML = `
+        <div class="cast-list">${castNames.slice(0,10).map(name => `
+          <div class="cast-chip fade-in">
+            <div class="cast-chip-ph">👤</div>
+            <div class="cast-chip-info"><div class="cast-chip-name">${name}</div></div>
+          </div>`).join('')}
+        </div>`;
+      requestAnimationFrame(() => observeAll());
+    }
   }
 }
 
