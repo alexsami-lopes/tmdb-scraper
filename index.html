@@ -866,15 +866,29 @@ function normalizeDate(d) {
 function formatDate(d) {
   if (!d) return '—';
 
-  const date = new Date(normalizeDate(d));
+  const meses = [
+    'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+    'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+  ];
 
-  const str = date.toLocaleDateString('pt-BR', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric'
-  });
+  // 1. Tenta normalizar primeiro (seu método)
+  const normalized = normalizeDate(d);
 
-  return str.replace(/de (\w)/, (_, l) => 'de ' + l.toUpperCase());
+  // 2. Se já está no formato correto YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+    const [y, m, day] = normalized.split('-');
+    return `${Number(day)} de ${meses[Number(m) - 1]} de ${y}`;
+  }
+
+  // 3. Fallback seguro (caso venha outro formato)
+  const date = new Date(d);
+
+  if (!isNaN(date)) {
+    return `${date.getDate()} de ${meses[date.getMonth()]} de ${date.getFullYear()}`;
+  }
+
+  // 4. Último fallback
+  return d;
 }
 
 async function api(params) {
