@@ -883,29 +883,11 @@ function normalizeDate(d) {
 function formatDate(d) {
   if (!d) return '—';
 
-  const meses = [
-    'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
-    'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'
-  ];
+  const meses = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
 
-  const s = String(d).trim();
+  const [y, m, day] = d.split('-');
 
-  // Caso já venha DD/MM/YYYY
-  const dmy = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (dmy) {
-    const [, day, month, year] = dmy;
-    return `${Number(day)} ${meses[Number(month) - 1]} ${year}`;
-  }
-
-  // Normaliza para YYYY-MM-DD
-  const n = normalizeDate(s);
-
-  if (/^\d{4}-\d{2}-\d{2}$/.test(n)) {
-    const [y, m, day] = n.split('-');
-    return `${Number(day)} ${meses[Number(m) - 1]} ${y}`;
-  }
-
-  return s;
+  return `${Number(day)} ${meses[Number(m) - 1]} ${y}`;
 }
 
 async function api(params) {
@@ -1289,16 +1271,17 @@ document.addEventListener('keydown', e => { if (e.key==='Escape') closeModalDire
 
 //   await loadDayData(selectedDate);
 // }
-
 async function loadDates() {
   const data = await api({ action: 'dates' });
   const dates = data.dates || [];
+
+  console.log('DATES API:', dates);
 
   if (!dates.length) return;
 
   setupCustomSelect(dates);
 
-  await loadDayData(selectedDate);
+  await loadDayData(dates[0]); // já vem correto
 }
 
 function setupCustomSelect(dates) {
@@ -1306,29 +1289,36 @@ function setupCustomSelect(dates) {
   const trigger = wrapper.querySelector('.custom-select__trigger');
   const dropdown = wrapper.querySelector('.custom-select__dropdown');
 
+  // 🔥 NÃO NORMALIZA MAIS
   const normalizedDates = [...new Set(dates)]
-    .filter(Boolean)
+    .filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)) // garante formato correto
     .sort()
     .reverse();
 
+  console.log('DATES FILTRADAS:', normalizedDates);
+
+  // 🔥 monta dropdown corretamente
   dropdown.innerHTML = normalizedDates.map(d =>
     `<div class="custom-select__option" data-value="${d}">
       ${formatDate(d)}
     </div>`
   ).join('');
 
+  // valor inicial
   selectedDate = normalizedDates[0];
   trigger.textContent = formatDate(selectedDate);
 
+  // abrir/fechar
   trigger.onclick = () => {
     wrapper.classList.toggle('open');
   };
 
+  // clique nas opções
   dropdown.querySelectorAll('.custom-select__option').forEach(opt => {
     opt.onclick = () => {
       selectedDate = opt.dataset.value;
 
-      // 🔥 ESSENCIAL
+      // 🔥 SEMPRE formatar aqui
       trigger.textContent = formatDate(selectedDate);
 
       dropdown.querySelectorAll('.custom-select__option')
@@ -1341,6 +1331,7 @@ function setupCustomSelect(dates) {
     };
   });
 
+  // fechar ao clicar fora
   document.addEventListener('click', e => {
     if (!wrapper.contains(e.target)) {
       wrapper.classList.remove('open');
@@ -1348,9 +1339,13 @@ function setupCustomSelect(dates) {
   });
 }
 
+
 async function loadDayData(date) {
-  const normalDate = normalizeDate(date);
-  // Ranking e top20 em paralelo
+  console.log('LOAD DAY:', date);
+
+  // 🔥 NÃO NORMALIZA MAIS
+  const normalDate = date;
+
   const [rankData, top20Data] = await Promise.all([
     api({ action: 'ranking', date: normalDate }),
     api({ action: 'top20',   date: normalDate }),
@@ -1359,18 +1354,26 @@ async function loadDayData(date) {
   const ranking = rankData.ranking || [];
   const top20   = top20Data.movies  || [];
 
-  // Merge para ter todos os filmes do dia disponíveis para modal e busca
+  // merge
   const merged = [...ranking, ...top20];
   const seen   = new Set();
-  allMovies    = merged.filter(m => { if (seen.has(m.id)) return false; seen.add(m.id); return true; });
 
-  // Cache para busca histórica
-  allMovies.forEach(m => {
-    if (!cachedMovies.find(c => c.id === m.id)) cachedMovies.push(m);
+  allMovies = merged.filter(m => {
+    if (seen.has(m.id)) return false;
+    seen.add(m.id);
+    return true;
   });
 
-  // Hero com top 5
+  // cache
+  allMovies.forEach(m => {
+    if (!cachedMovies.find(c => c.id === m.id)) {
+      cachedMovies.push(m);
+    }
+  });
+
+  // hero
   heroMovies = ranking.filter(m => m.poster_path).slice(0, 5);
+
   if (heroMovies.length) {
     goHero(0);
     buildDots(heroMovies);
