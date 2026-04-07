@@ -545,10 +545,12 @@
 
     /* ── MODAL ──────────────────────────────────────────── */
     .modal-backdrop {
-      position: fixed; inset: 0; z-index: 200;
+      position: flex-start; inset: 0; z-index: 200;
       background: rgba(5,5,10,.92);
       display: flex; align-items: center; justify-content: center;
       padding: 1.5rem;
+      padding-top: 2rem;   /* garante espaço pro botão */
+      padding-bottom: 2rem;
       opacity: 0; pointer-events: none;
       transition: opacity .3s;
       backdrop-filter: blur(8px);
