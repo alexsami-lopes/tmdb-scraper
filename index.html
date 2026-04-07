@@ -99,6 +99,84 @@
     }
     .date-pill select:focus { border-color: var(--gold); }
 
+    /* ── CUSTOM SELECT ───────────────────────────── */
+    .custom-select {
+      position: relative;
+      font-size: .72rem;
+      min-width: 140px;
+    }
+
+    .custom-select__trigger {
+      background: rgba(255,255,255,.06);
+      border: 1px solid rgba(255,255,255,.1);
+      color: var(--paper);
+      padding: .35rem .7rem;
+      border-radius: 3px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: .6rem;
+      transition: background .2s, border-color .2s;
+    }
+
+    .custom-select__trigger:hover {
+      background: rgba(255,255,255,.12);
+    }
+
+    .custom-select.open .custom-select__trigger {
+      border-color: var(--gold);
+    }
+
+    /* seta */
+    .custom-select__trigger::after {
+      content: '▾';
+      font-size: .6rem;
+      color: var(--gold);
+    }
+
+    /* dropdown */
+    .custom-select__dropdown {
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0;
+      right: 0;
+      background: #13131c;
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: 3px;
+      overflow: hidden;
+      opacity: 0;
+      transform: translateY(-6px);
+      pointer-events: none;
+      transition: all .2s var(--ease);
+      z-index: 200;
+    }
+
+    .custom-select.open .custom-select__dropdown {
+      opacity: 1;
+      transform: none;
+      pointer-events: all;
+    }
+
+    /* opções */
+    .custom-select__option {
+      padding: .5rem .7rem;
+      cursor: pointer;
+      color: rgba(255,255,255,.7);
+      transition: background .2s, color .2s;
+    }
+
+    .custom-select__option:hover {
+      background: rgba(255,255,255,.08);
+      color: var(--paper);
+    }
+
+    .custom-select__option.selected {
+      background: var(--gold);
+      color: var(--ink);
+      font-weight: 600;
+    }    
+
     @media (max-width: 640px) {
       .nav { display: none; }
       .date-pill label { display: none; }
@@ -642,7 +720,10 @@
   </nav>
   <div class="date-pill">
     <label>Data</label>
-    <select id="date-select"><option>Carregando…</option></select>
+    <div class="custom-select" id="date-select">
+    <div class="custom-select__trigger">Carregando…</div>
+    <div class="custom-select__dropdown"></div>
+  </div>
   </div>
 </header>
 
@@ -1147,34 +1228,95 @@ function closeModalDirect() {
 document.addEventListener('keydown', e => { if (e.key==='Escape') closeModalDirect(); });
 
 // ── DATE SELECTOR ─────────────────────────────────────────
+// async function loadDates() {
+//   const data = await api({ action: 'dates' });
+//   const dates = data.dates || [];
+
+//   const sel = $('date-select');
+//   if (!dates.length) {
+//     sel.innerHTML = '<option>Sem dados</option>';
+//     return;
+//   }
+
+//   sel.innerHTML = dates.map(d =>
+//     `<option value="${d}">${formatDate(d)}</option>`
+//   ).join('');
+
+//   // Normalize all dates to YYYY-MM-DD
+//   const normalizedDates = [...new Set(dates.map(normalizeDate))].filter(Boolean).sort().reverse();
+
+//   sel.innerHTML = normalizedDates.map(d =>
+//     `<option value="${d}">${formatDate(d)}</option>`
+//   ).join('');
+
+//   selectedDate = normalizedDates[0];
+//   sel.addEventListener('change', () => {
+//     selectedDate = sel.value;
+//     loadDayData(selectedDate);
+//   });
+
+//   await loadDayData(selectedDate);
+// }
+
 async function loadDates() {
   const data = await api({ action: 'dates' });
   const dates = data.dates || [];
 
-  const sel = $('date-select');
-  if (!dates.length) {
-    sel.innerHTML = '<option>Sem dados</option>';
-    return;
-  }
+  if (!dates.length) return;
 
-  sel.innerHTML = dates.map(d =>
-    `<option value="${d}">${formatDate(d)}</option>`
-  ).join('');
-
-  // Normalize all dates to YYYY-MM-DD
-  const normalizedDates = [...new Set(dates.map(normalizeDate))].filter(Boolean).sort().reverse();
-
-  sel.innerHTML = normalizedDates.map(d =>
-    `<option value="${d}">${formatDate(d)}</option>`
-  ).join('');
-
-  selectedDate = normalizedDates[0];
-  sel.addEventListener('change', () => {
-    selectedDate = sel.value;
-    loadDayData(selectedDate);
-  });
+  setupCustomSelect(dates);
 
   await loadDayData(selectedDate);
+}
+
+function setupCustomSelect(dates) {
+  const wrapper = document.getElementById('date-select');
+  const trigger = wrapper.querySelector('.custom-select__trigger');
+  const dropdown = wrapper.querySelector('.custom-select__dropdown');
+
+  const normalizedDates = [...new Set(dates.map(normalizeDate))]
+    .filter(Boolean)
+    .sort()
+    .reverse();
+
+  // cria opções
+  dropdown.innerHTML = normalizedDates.map(d =>
+    `<div class="custom-select__option" data-value="${d}">
+      ${formatDate(d)}
+    </div>`
+  ).join('');
+
+  // valor inicial
+  selectedDate = normalizedDates[0];
+  trigger.textContent = formatDate(selectedDate);
+
+  // abrir/fechar
+  trigger.onclick = () => {
+    wrapper.classList.toggle('open');
+  };
+
+  // selecionar
+  dropdown.querySelectorAll('.custom-select__option').forEach(opt => {
+    opt.onclick = () => {
+      selectedDate = opt.dataset.value;
+      trigger.textContent = opt.textContent;
+
+      dropdown.querySelectorAll('.custom-select__option')
+        .forEach(o => o.classList.remove('selected'));
+
+      opt.classList.add('selected');
+      wrapper.classList.remove('open');
+
+      loadDayData(selectedDate);
+    };
+  });
+
+  // fecha ao clicar fora
+  document.addEventListener('click', e => {
+    if (!wrapper.contains(e.target)) {
+      wrapper.classList.remove('open');
+    }
+  });
 }
 
 async function loadDayData(date) {
