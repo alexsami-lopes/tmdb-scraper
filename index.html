@@ -103,7 +103,7 @@
     .custom-select {
       position: relative;
       font-size: .72rem;
-      min-width: 140px;
+      min-width: 220px;
     }
 
     .custom-select__trigger {
@@ -865,15 +865,16 @@ function normalizeDate(d) {
 
 function formatDate(d) {
   if (!d) return '—';
-  const s = String(d).trim();
-  // Already DD/MM/YYYY
-  if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) return s;
-  const n = normalizeDate(s);
-  if (/^\d{4}-\d{2}-\d{2}$/.test(n)) {
-    const [y,mo,dy] = n.split('-');
-    return `${dy}/${mo}/${y}`;
-  }
-  return s;
+
+  const date = new Date(normalizeDate(d));
+
+  const str = date.toLocaleDateString('pt-BR', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric'
+  });
+
+  return str.replace(/de (\w)/, (_, l) => 'de ' + l.toUpperCase());
 }
 
 async function api(params) {
