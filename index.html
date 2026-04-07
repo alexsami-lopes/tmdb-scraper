@@ -1303,7 +1303,7 @@ function setupCustomSelect(dates) {
 
   // valor inicial
   selectedDate = normalizedDates[0];
-  trigger.textContent = formatDate(selectedDate);
+  trigger.textContent = formatDate(normalizeDate(selectedDate));
 
   // abrir/fechar
   trigger.onclick = () => {
@@ -1332,6 +1332,9 @@ function setupCustomSelect(dates) {
       wrapper.classList.remove('open');
     }
   });
+
+  console.log('selectedDate RAW:', selectedDate);
+  console.log('formatted:', formatDate(selectedDate));
 }
 
 async function loadDayData(date) {
