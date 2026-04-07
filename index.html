@@ -865,30 +865,15 @@ function normalizeDate(d) {
 
 function formatDate(d) {
   if (!d) return '—';
-
-  const meses = [
-    'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
-    'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
-  ];
-
-  // 1. Tenta normalizar primeiro (seu método)
-  const normalized = normalizeDate(d);
-
-  // 2. Se já está no formato correto YYYY-MM-DD
-  if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
-    const [y, m, day] = normalized.split('-');
-    return `${Number(day)} de ${meses[Number(m) - 1]} de ${y}`;
+  const s = String(d).trim();
+  // Already DD/MM/YYYY
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) return s;
+  const n = normalizeDate(s);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(n)) {
+    const [y,mo,dy] = n.split('-');
+    return `${dy}/${mo}/${y}`;
   }
-
-  // 3. Fallback seguro (caso venha outro formato)
-  const date = new Date(d);
-
-  if (!isNaN(date)) {
-    return `${date.getDate()} de ${meses[date.getMonth()]} de ${date.getFullYear()}`;
-  }
-
-  // 4. Último fallback
-  return d;
+  return s;
 }
 
 async function api(params) {
