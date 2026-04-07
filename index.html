@@ -1314,7 +1314,7 @@ function setupCustomSelect(dates) {
   dropdown.querySelectorAll('.custom-select__option').forEach(opt => {
     opt.onclick = () => {
       selectedDate = opt.dataset.value;
-      trigger.textContent = opt.textContent;
+      trigger.textContent = formatDate(selectedDate);
 
       dropdown.querySelectorAll('.custom-select__option')
         .forEach(o => o.classList.remove('selected'));
