@@ -1306,31 +1306,29 @@ function setupCustomSelect(dates) {
   const trigger = wrapper.querySelector('.custom-select__trigger');
   const dropdown = wrapper.querySelector('.custom-select__dropdown');
 
-  const normalizedDates = [...new Set(dates.map(normalizeDate))]
+  const normalizedDates = [...new Set(dates)]
     .filter(Boolean)
     .sort()
     .reverse();
 
-  // cria opções
   dropdown.innerHTML = normalizedDates.map(d =>
     `<div class="custom-select__option" data-value="${d}">
       ${formatDate(d)}
     </div>`
   ).join('');
 
-  // valor inicial
   selectedDate = normalizedDates[0];
-  trigger.textContent = formatDate(normalizeDate(selectedDate));
+  trigger.textContent = formatDate(selectedDate);
 
-  // abrir/fechar
   trigger.onclick = () => {
     wrapper.classList.toggle('open');
   };
 
-  // selecionar
   dropdown.querySelectorAll('.custom-select__option').forEach(opt => {
     opt.onclick = () => {
       selectedDate = opt.dataset.value;
+
+      // 🔥 ESSENCIAL
       trigger.textContent = formatDate(selectedDate);
 
       dropdown.querySelectorAll('.custom-select__option')
@@ -1343,15 +1341,11 @@ function setupCustomSelect(dates) {
     };
   });
 
-  // fecha ao clicar fora
   document.addEventListener('click', e => {
     if (!wrapper.contains(e.target)) {
       wrapper.classList.remove('open');
     }
   });
-
-  console.log('selectedDate RAW:', selectedDate);
-  console.log('formatted:', formatDate(selectedDate));
 }
 
 async function loadDayData(date) {
