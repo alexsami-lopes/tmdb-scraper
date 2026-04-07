@@ -855,12 +855,29 @@ function formatRuntime(m) {
 
 function normalizeDate(d) {
   if (!d) return '';
+
   const s = String(d).trim();
-  if (s.includes('T')) return s.slice(0, 10);   // ISO: 2026-03-27T03:00:00.000Z
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s; // já YYYY-MM-DD
+
+  // ISO
+  if (s.includes('T')) return s.slice(0, 10);
+
+  // YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+
+  // DD/MM/YYYY
   const dmy = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (dmy) return `${dmy[3]}-${dmy[2]}-${dmy[1]}`; // DD/MM/YYYY → YYYY-MM-DD
-  return s;
+  if (dmy) return `${dmy[3]}-${dmy[2]}-${dmy[1]}`;
+
+  // 🔥 NOVO: formato tipo "Wed Apr 01 2026"
+  const parsed = new Date(s);
+  if (!isNaN(parsed)) {
+    const y = parsed.getFullYear();
+    const m = String(parsed.getMonth() + 1).padStart(2, '0');
+    const day = String(parsed.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
+  return '';
 }
 
 function formatDate(d) {
