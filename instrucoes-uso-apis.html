@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <title>CineRank — Instruções de Uso da API</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #0f172a;
+            color: #e2e8f0;
+            margin: 0;
+            padding: 20px;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        h2 {
+            margin-top: 30px;
+            border-left: 4px solid #38bdf8;
+            padding-left: 10px;
+        }
+
+        .section {
+            background: #1e293b;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+
+        ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        li {
+            margin: 8px 0;
+        }
+
+        a {
+            text-decoration: none;
+            color: #38bdf8;
+            transition: 0.2s;
+        }
+
+        a:hover {
+            color: #7dd3fc;
+            padding-left: 5px;
+        }
+
+        .tag {
+            font-size: 12px;
+            background: #334155;
+            padding: 2px 6px;
+            border-radius: 6px;
+            margin-left: 8px;
+        }
+
+        pre {
+            background: #020617;
+            padding: 10px;
+            border-radius: 8px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>🎬 CineRank — Instruções de Uso da API</h1>
+
+    <div class="section">
+        <h2>📌 Base da API</h2>
+        <p>A API é uma <strong>Google Apps Script Web App</strong>. Todas as rotas usam <strong>GET</strong>.</p>
+        <pre><code>BASE_URL = https://script.google.com/macros/s/AKfycbxnq0OcYmMbs70VPbaRv2oEELh9tedda6bvcWKH_HNL4mNbDtEJX_5ZnDheSXr8y9y-MQ/exec</code></pre>
+    </div>
+
+    <div class="section">
+        <h2>🛠️ Ferramentas recomendadas</h2>
+        <ul>
+            <li><a href="https://www.postman.com" target="_blank">Postman</a></li>
+            <li><a href="https://chromewebstore.google.com/detail/rest-client/oienkoejnhkbcibhdnpjoemdnmiokgah"
+                    target="_blank">REST Client (Chrome Extension)</a></li>
+        </ul>
+    </div>
+
+    <div class="section">
+        <h2>⚠️ Observações gerais</h2>
+        <ul>
+            <li>Método: <span class="tag">GET</span></li>
+            <li>Autenticação: nenhuma nas rotas públicas</li>
+            <li>Formato de data: <span class="tag">YYYY-MM-DD</span></li>
+            <li>Campos nulos aparecem como <span class="tag">null</span></li>
+            <li><span class="tag">genres</span>, <span class="tag">screenplay</span>, <span class="tag">cast</span> são
+                arrays</li>
+            <li>Parâmetros via <strong>query string</strong></li>
+        </ul>
+    </div>
+
+    <div class="section">
+        <h2>🏆 Top 10 Melhores Avaliados</h2>
+        <pre><code>GET BASE_URL?action=ranking&date=YYYY-MM-DD</code></pre>
+
+        <pre><code>GET https://script.google.com/macros/s/AKfycbxnq0OcYmMbs70VPbaRv2oEELh9tedda6bvcWKH_HNL4mNbDtEJX_5ZnDheSXr8y9y-MQ/exec?action=ranking&date=2026-03-27</code></pre>
+
+        <pre><code>{
+  "status": "ok",
+  "ranking": [
+    {
+      "date": "2026-03-27T03:00:00.000Z",
+      "id": 972232,
+      "title": "K-Pops!",
+      "vote_average": 10,
+      "genres": "Comédia, Drama, Música",
+      "release_date": "2026-02-27T03:00:00.000Z",
+      "runtime": 114,
+      "overview": "A washed-up musician travels to Korea to write for K-pop stars, discovering ...",
+      "original_language": "Inglês",
+      "status": "Lançado",
+      "director": "Anderson .Paak",
+      "screenplay": "Khaila Amazan, Jonnie Park",
+      "cast": "Anderson .Paak, Soul Rasheed, Yvette Nicole Brown, Jee Young Han, Jonnie Park, Cathy Shim, Kevin Woo, Will Jay, Emi Kim",
+      "poster_path": "https://image.tmdb.org/t/p/w500/72KQHN1xUO6gWHLRRPyJcCQXlve.jpg",
+      "url": "https://www.themoviedb.org/movie/972232-k-pops",
+      "scraped_at": "2026-03-27T22:56:45.200Z"
+    },...
+    ]
+}</code></pre>
+    </div>
+
+    <div class="section">
+        <h2>🔥 Top 20 Mais Populares</h2>
+        <pre><code>GET BASE_URL?action=top20&date=YYYY-MM-DD</code></pre>
+
+        <pre><code>GET https://script.google.com/macros/s/AKfycbxnq0OcYmMbs70VPbaRv2oEELh9tedda6bvcWKH_HNL4mNbDtEJX_5ZnDheSXr8y9y-MQ/exec?action=top20&date=2026-03-27</code></pre>
+
+        <pre><code>{
+  "status": "ok",
+  "movies": [
+    {
+      "date": "2026-03-27T03:00:00.000Z",
+      "id": 972232,
+      "title": "K-Pops!",
+      "vote_average": 10,
+      "genres": "Comédia, Drama, Música",
+      "release_date": "2026-02-27T03:00:00.000Z",
+      "runtime": 114,
+      "overview": "A washed-up musician travels to Korea to write for K-pop stars, discovering ...",
+      "original_language": "Inglês",
+      "status": "Lançado",
+      "director": "Anderson .Paak",
+      "screenplay": "Khaila Amazan, Jonnie Park",
+      "cast": "Anderson .Paak, Soul Rasheed, Yvette Nicole Brown, Jee Young Han, Jonnie Park, Cathy Shim, Kevin Woo, Will Jay, Emi Kim",
+      "poster_path": "https://image.tmdb.org/t/p/w500/72KQHN1xUO6gWHLRRPyJcCQXlve.jpg",
+      "url": "https://www.themoviedb.org/movie/972232-k-pops",
+      "scraped_at": "2026-03-27T22:56:45.200Z"
+    },...
+    ]
+}</code></pre>
+    </div>
+
+    <div class="section">
+        <h2>📈 Trending (Mais tempo em cartaz)</h2>
+        <pre><code>GET BASE_URL?action=trending</code></pre>
+        <pre><code>GET https://script.google.com/macros/s/AKfycbxnq0OcYmMbs70VPbaRv2oEELh9tedda6bvcWKH_HNL4mNbDtEJX_5ZnDheSXr8y9y-MQ/exec?action=trending</code></pre>
+
+        <pre><code>{
+  "status": "ok",
+  "trending": [
+    {
+      "id": 1734,
+      "title": "O Retorno da Múmia",
+      "poster_path": "https://image.tmdb.org/t/p/w500/34X3xSSriMVdHHO9EEpe8thhDCC.jpg",
+      "vote_average": 6.4,
+      "days_in_theaters": 9
+    },...
+    ]
+}</code></pre>
+    </div>
+
+    <div class="section">
+        <h2>🕓 Histórico de um Filme</h2>
+        <pre><code>GET BASE_URL?action=history&id=NNNN</code></pre>
+        <pre><code>GET https://script.google.com/macros/s/AKfycbxnq0OcYmMbs70VPbaRv2oEELh9tedda6bvcWKH_HNL4mNbDtEJX_5ZnDheSXr8y9y-MQ/exec?action=history&id=1734</code></pre>
+
+        <pre><code>{
+
+  "status": "ok",
+  "history": [
+    {
+      "date": "2026-03-27T03:00:00.000Z",
+      "id": 1734,
+      "title": "O Retorno da Múmia",
+      "vote_average": 6.4,
+      "genres": "Aventura, Ação, Fantasia",
+      "release_date": "2001-05-04T03:00:00.000Z",
+      "runtime": 130,
+      "overview": "Rick e Evelyn O'Connell estão morando na Londres de 1935, onde criam o filho. Quando uma série de eventos revela ...",
+      "original_language": "Inglês",
+      "status": "Lançado",
+      "director": "Stephen Sommers",
+      "screenplay": "",
+      "cast": "Brendan Fraser, Rachel Weisz, John Hannah, Oded Fehr, Arnold Vosloo, Patricia Velásquez, Freddie Boath, Dwayne Johnson, Alun Armstrong",
+      "poster_path": "https://image.tmdb.org/t/p/w500/34X3xSSriMVdHHO9EEpe8thhDCC.jpg",
+      "url": "https://www.themoviedb.org/movie/1734-the-mummy-returns",
+      "scraped_at": "2026-03-27T22:56:18.844Z"
+    },...
+    ]
+
+}</code></pre>
+    </div>
+
+    <div class="section">
+        <h2>📅 Datas Disponíveis</h2>
+        <pre><code>GET BASE_URL?action=dates</code></pre>
+        <pre><code>GET https://script.google.com/macros/s/AKfycbxnq0OcYmMbs70VPbaRv2oEELh9tedda6bvcWKH_HNL4mNbDtEJX_5ZnDheSXr8y9y-MQ/exec?action=dates</code></pre>
+
+        <pre><code>{
+  "status": "ok",
+  "dates": [
+    "2026-04-04",
+    "2026-04-03",
+    "2026-04-02",
+    "2026-04-01",
+    "2026-03-31",
+    "2026-03-30",
+    "2026-03-29",
+    "2026-03-28",
+    "2026-03-27",
+    ...
+  ]
+}</code></pre>
+    </div>
+
+    <div class="section">
+        <h2>🔒 Rota Privada</h2>
+        <pre><code>GET BASE_URL?action=count&secret=SUA_SENHA</code></pre>
+        <pre><code>GET https://script.google.com/macros/s/AKfycbxnq0OcYmMbs70VPbaRv2oEELh9tedda6bvcWKH_HNL4mNbDtEJX_5ZnDheSXr8y9y-MQ/exec?action=count&secret=SUA_SENHA</code></pre>
+
+        <pre><code>{
+  "status": "ok"
+}</code></pre>
+    </div>
+
+    <div class="section">
+        <h2>❌ Resposta de erro</h2>
+        <pre><code>{
+  "status": "error",
+  "message": "Descrição do problema"
+}</code></pre>
+    </div>
+
+    <div class="section">
+        <h2>📬 Como usar no Postman</h2>
+        <ul>
+            <li>New → HTTP Request</li>
+            <li>Método: GET</li>
+            <li>Inserir URL</li>
+            <li>Send</li>
+            <li>Ver resposta em Body → JSON</li>
+        </ul>
+    </div>
+
+    <div class="section">
+        <h2>🌐 REST Client (Chrome Extension)</h2>
+        <ul>
+            <li>Instalar extensão</li>
+            <li>Criar requisição</li>
+            <li>Método: GET</li>
+            <li>Enviar</li>
+            <li>Visualizar resposta</li>
+        </ul>
+    </div>
+
+</body>
+
+</html>

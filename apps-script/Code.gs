@@ -1,580 +1,469 @@
 /**
- * TMDb Scraper — Apps Script
+ * TMDb Scraper API — Production Ready
  *
- * Recebe os dados do scraper via POST, valida o secret,
- * insere os filmes na aba "filmes" e registra a execução na aba "runs".
+ * Recebe dados via POST do scraper, valida o secret,
+ * insere filmes/elenco e registra logs de execução.
  *
- * Também expõe endpoints GET para:
- *  - ?action=count  → total de registros (usado pelo scraper para checar limite)
- *  - ?action=ranking&date=YYYY-MM-DD → top 10 por nota de um dia
- *  - ?action=top20&date=YYYY-MM-DD  → top 20 por popularidade de um dia
- *  - ?action=dates                  → lista de datas disponíveis
- *  - ?action=history&id=NNNNN       → histórico de um filme específico
- *  - ?action=trending               → filmes que aparecem há mais dias
+ * ─────────────────────────────────────────────
+ * ENDPOINTS GET
+ * ─────────────────────────────────────────────
+ *
+ * Públicos:
+ *
+ *  ?action=ranking&date=YYYY-MM-DD
+ *    → Top 10 filmes por nota em uma data
+ *
+ *  ?action=top20&date=YYYY-MM-DD
+ *    → Top 20 filmes por nota
+ *
+ *  ?action=dates
+ *    → Lista de datas disponíveis
+ *
+ *  ?action=history&id=NNNNN
+ *    → Histórico completo de um filme
+ *
+ *  ?action=trending
+ *    → Filmes com maior número de dias únicos em cartaz
+ *
+ *  ?action=runs
+ *    → Log de execuções do scraper
+ *
+ *  ?action=cast&id=NNNNN
+ *    → Elenco de um filme
+ *
+ *  ?action=search&q=texto
+ *    → Busca por nome (retorna versões mais recentes)
+ *
+ * ─────────────────────────────────────────────
+ * Privados:
+ *
+ *  ?action=count&secret=SEU_SECRET
+ *    → Total de registros (usado pelo scraper)
+ *
+ * ─────────────────────────────────────────────
+ * OBSERVAÇÕES:
+ *
+ * - Cache aplicado em: ranking, top20, dates, trending
+ * - Deduplicação por (movie_id + date)
+ * - Trending considera dias únicos (não duplicatas)
+ * - Search retorna sempre o registro mais recente
+ *
  */
 
-// ─── CONFIGURAÇÃO ────────────────────────────────────────────────────────────
+// ───────────────── CONFIG ─────────────────
 
-// ⚠️ Troque pelo mesmo valor do secret APPS_SCRIPT_SECRET no GitHub
-const SECRET = 'COLOQUE_SEU_SECRET_AQUI';
+const SECRET = PropertiesService.getScriptProperties().getProperty('SECRET');
 
-// Nomes das abas da planilha
 const SHEET_MOVIES = 'filmes';
 const SHEET_RUNS   = 'runs';
 const SHEET_CAST   = 'elenco';
 
-// Colunas da aba "elenco"
-const CAST_HEADERS = [
-  'date',
-  'movie_id',
-  'movie_title',
-  'actor_name',
-  'character',
-  'photo_url',
-];
+const CACHE_TTL = 300; // 5 min
 
-// Colunas da aba "filmes" — ordem importa, deve bater com HEADERS abaixo
 const HEADERS = [
-  'date',
-  'id',
-  'title',
-  'vote_average',
-  'genres',
-  'release_date',
-  'runtime',
-  'overview',
-  'original_language',
-  'status',
-  'director',
-  'screenplay',
-  'cast',
-  'poster_path',
-  'url',
-  'scraped_at',
+  'date','id','title','vote_average','genres','release_date','runtime',
+  'overview','original_language','status','director','screenplay',
+  'cast','poster_path','url','scraped_at'
 ];
 
-// Colunas da aba "runs"
 const RUN_HEADERS = [
-  'date',
-  'total_inserted',
-  'total_records_after',
-  'status',
-  'duration_ms',
-  'ran_at',
+  'date','total_inserted','total_records_after','status','duration_ms','ran_at'
 ];
 
-// ─── ENTRY POINTS ─────────────────────────────────────────────────────────────
+const CAST_HEADERS = [
+  'date','movie_id','movie_title','actor_name','character','photo_url'
+];
 
-/**
- * Recebe os dados do scraper (POST com JSON no body).
- * Chamado pelo scraper.js ao final do scraping.
- */
+// ───────────────── ENTRY ─────────────────
+
 function doPost(e) {
-  const startTime = Date.now();
+  const start = Date.now();
+  const lock = LockService.getScriptLock();
 
   try {
+    lock.waitLock(30000);
+
     const body = JSON.parse(e.postData.contents);
 
-    // Valida o secret
     if (body.secret !== SECRET) {
-      return jsonResponse({ status: 'error', message: 'Unauthorized' });
+      return json({ status: 'error', message: 'Unauthorized' });
     }
 
     const movies = body.movies || [];
-    const date   = body.date   || today();
+    const date   = normalizeDate(body.date || today());
 
-    if (!Array.isArray(movies) || movies.length === 0) {
-      return jsonResponse({ status: 'error', message: 'Nenhum filme recebido.' });
+    if (!movies.length) {
+      return json({ status: 'error', message: 'No movies' });
     }
 
-    // Garante que as abas existem com os cabeçalhos corretos
     ensureSheet(SHEET_MOVIES, HEADERS);
-    ensureSheet(SHEET_RUNS,   RUN_HEADERS);
-    ensureSheet(SHEET_CAST,   CAST_HEADERS);
+    ensureSheet(SHEET_RUNS, RUN_HEADERS);
+    ensureSheet(SHEET_CAST, CAST_HEADERS);
 
-    // Insere os filmes
-    const inserted = insertMovies(movies, date);
+    const inserted = insertMoviesSafe(movies, date);
+    insertCastBatch(movies, date);
 
-    // Insere o elenco na aba separada
-    insertCast(movies, date);
+    const total = getTotalCount();
 
-    // Conta total de registros após inserção
-    const totalAfter = getTotalCount();
+    logRunBatch([[
+      date, inserted, total, 'success',
+      Date.now() - start,
+      new Date().toISOString()
+    ]]);
 
-    // Registra a execução no log
-    logRun({
-      date,
-      total_inserted:      inserted,
-      total_records_after: totalAfter,
-      status:              'success',
-      duration_ms:         Date.now() - startTime,
-      ran_at:              new Date().toISOString(),
-    });
+    clearCache();
 
-    return jsonResponse({
-      status:   'ok',
-      inserted,
-      total:    totalAfter,
-      date,
-    });
+    return json({ status: 'ok', inserted, total });
 
   } catch (err) {
-    // Tenta registrar a falha no log
-    try {
-      ensureSheet(SHEET_RUNS, RUN_HEADERS);
-      logRun({
-        date:                today(),
-        total_inserted:      0,
-        total_records_after: getTotalCount(),
-        status:              `error: ${err.message}`,
-        duration_ms:         Date.now() - startTime,
-        ran_at:              new Date().toISOString(),
-      });
-    } catch (_) {}
-
-    return jsonResponse({ status: 'error', message: err.message });
+    return json({ status: 'error', message: err.message });
+  } finally {
+    lock.releaseLock();
   }
 }
 
-/**
- * Responde a requisições GET da API.
- *
- * Endpoints PÚBLICOS (frontend) — sem secret:
- *   ?action=ranking&date=YYYY-MM-DD
- *   ?action=top20&date=YYYY-MM-DD
- *   ?action=dates
- *   ?action=history&id=NNNNN
- *   ?action=trending
- *   ?action=runs
- *
- * Endpoints PRIVADOS (scraper) — exigem secret:
- *   ?action=count&secret=...
- */
 function doGet(e) {
-  const params = e.parameter || {};
-  const action = params.action || '';
-  const secret = params.secret || '';
+  const p = e.parameter || {};
+  const action = p.action || '';
 
-  // Endpoints privados — exigem secret
   if (action === 'count') {
-    if (secret !== SECRET) {
-      return jsonResponse({ status: 'error', message: 'Unauthorized' });
-    }
-    return jsonResponse({ status: 'ok', total: getTotalCount() });
+    if (p.secret !== SECRET) return json({ status: 'error' });
+    return json({ status: 'ok', total: getTotalCount() });
   }
 
   try {
     switch (action) {
 
-      // Top 10 por nota de um dia (padrão: hoje)
-      case 'ranking': {
-        const date = params.date || today();
-        const data = getMoviesByDate(date);
-        const ranked = data
-          .filter(m => m.vote_average)
-          .sort((a, b) => b.vote_average - a.vote_average)
-          .slice(0, 10);
-        return jsonResponse({ status: 'ok', date, ranking: ranked });
-      }
+      case 'ranking':
+        return cached(`ranking_${p.date}`, () => {
+          const data = getMoviesByDate(p.date);
+          return {
+            status: 'ok',
+            ranking: data
+              .filter(m => m.vote_average)
+              .sort((a,b)=>b.vote_average-a.vote_average)
+              .slice(0,10)
+          };
+        });
 
-      // Top 20 por nota de um dia (padrão: hoje)
-      case 'top20': {
-        const date = params.date || today();
-        const data = getMoviesByDate(date);
-        const top = data
-          .filter(m => m.vote_average)
-          .sort((a, b) => b.vote_average - a.vote_average)
-          .slice(0, 20);
-        return jsonResponse({ status: 'ok', date, movies: top });
-      }
+      case 'top20':
+        return cached(`top20_${p.date}`, () => {
+          const data = getMoviesByDate(p.date);
+          return {
+            status: 'ok',
+            movies: data
+              .filter(m => m.vote_average)
+              .sort((a,b)=>b.vote_average-a.vote_average)
+              .slice(0,20)
+          };
+        });
 
-      // Lista de datas disponíveis
       case 'dates':
-        return jsonResponse({ status: 'ok', dates: getAvailableDates() });
+        return cached('dates', () => ({
+          status:'ok',
+          dates:getAvailableDates()
+        }));
 
-      // Histórico de um filme pelo ID
-      case 'history': {
-        const id = parseInt(params.id);
-        if (!id) return jsonResponse({ status: 'error', message: 'id obrigatório' });
-        return jsonResponse({ status: 'ok', id, history: getMovieHistory(id) });
-      }
+      case 'history':
+        return json({
+          status:'ok',
+          history:getMovieHistory(p.id)
+        });
 
-      // Filmes que aparecem há mais dias
       case 'trending':
-        return jsonResponse({ status: 'ok', trending: getTrending() });
+        return cached('trending', () => ({
+          status:'ok',
+          trending:getTrending()
+        }));
 
-      // Log de execuções
       case 'runs':
-        return jsonResponse({ status: 'ok', runs: getRunsLog() });
+        return json({ status:'ok', runs:getRunsLog() });
 
-      // Elenco de um filme pelo ID (com fotos)
-      case 'cast': {
-        const id = parseInt(params.id);
-        if (!id) return jsonResponse({ status: 'error', message: 'id obrigatório' });
-        return jsonResponse({ status: 'ok', id, cast: getMovieCast(id) });
-      }
+      case 'cast':
+        return json({ status:'ok', cast:getMovieCast(p.id) });
 
-      // Busca filmes por nome (para o histórico)
-      case 'search': {
-        const q = (params.q || '').toLowerCase().trim();
-        if (!q) return jsonResponse({ status: 'error', message: 'q obrigatório' });
-        return jsonResponse({ status: 'ok', results: searchMovies(q) });
-      }
+      case 'search':
+        return json({ status:'ok', results:searchMovies(p.q) });
 
       default:
-        return jsonResponse({ status: 'error', message: 'Ação desconhecida: ' + action });
+        return json({ status:'error', message:'invalid action' });
     }
 
   } catch (err) {
-    return jsonResponse({ status: 'error', message: err.message });
+    return json({ status:'error', message:err.message });
   }
 }
 
-// ─── FUNÇÕES DE ESCRITA ───────────────────────────────────────────────────────
+// ───────────────── WRITE ─────────────────
 
-/**
- * Insere os filmes na aba "filmes".
- * Cada filme vira uma linha. Retorna quantos foram inseridos.
- */
-function insertMovies(movies, date) {
+function insertMoviesSafe(movies, date) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_MOVIES);
-  const rows  = movies.map(m => movieToRow(m, date));
 
-  if (rows.length === 0) return 0;
+  const existing = buildExistingSet(sheet);
+  const rows = [];
 
-  // Insere todas as linhas de uma vez (muito mais rápido que linha a linha)
-  sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, HEADERS.length)
+  movies.forEach(m => {
+    const key = `${m.id}_${date}`;
+    if (existing.has(key)) return;
+
+    rows.push(movieToRow(m, date));
+    existing.add(key);
+  });
+
+  if (!rows.length) return 0;
+
+  sheet.getRange(sheet.getLastRow()+1,1,rows.length,HEADERS.length)
        .setValues(rows);
 
   return rows.length;
 }
 
-/**
- * Insere o elenco de cada filme na aba elenco.
- * Cada ator de cada filme vira uma linha separada.
- */
-function insertCast(movies, date) {
+function insertCastBatch(movies, date) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_CAST);
-  const rows  = [];
+  const rows = [];
 
-  movies.forEach(m => {
-    if (!Array.isArray(m.cast) || m.cast.length === 0) return;
-    m.cast.forEach(actor => {
-      if (!actor.name) return;
-      rows.push([
-        date,
-        m.id    || '',
-        m.title || '',
-        actor.name,
-        actor.character  || '',
-        actor.photo_url  || '',
-      ]);
+  movies.forEach(m=>{
+    (m.cast||[]).forEach(a=>{
+      if (!a.name) return;
+      rows.push([date,m.id,m.title,a.name,a.character||'',a.photo_url||'']);
     });
   });
 
-  if (rows.length === 0) return;
+  if (!rows.length) return;
 
-  sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, CAST_HEADERS.length)
+  sheet.getRange(sheet.getLastRow()+1,1,rows.length,CAST_HEADERS.length)
        .setValues(rows);
 }
 
-/**
- * Converte um objeto de filme para um array de valores na ordem de HEADERS.
- */
-function movieToRow(m, date) {
-  return [
-    date,
-    m.id            || '',
-    m.title         || '',
-    m.vote_average  || '',
-    Array.isArray(m.genres)     ? m.genres.join(', ') : (m.genres || ''),
-    m.release_date  || '',
-    m.runtime       || '',
-    m.overview      || '',
-    m.original_language || '',
-    m.status        || '',
-    m.director      || '',
-    Array.isArray(m.screenplay) ? m.screenplay.join(', ') : (m.screenplay || ''),
-    Array.isArray(m.cast) ? m.cast.map(c => c.name).join(', ') : (m.cast || ''),
-    m.poster_path   || '',
-    m.url           || '',
-    m.scraped_at    || new Date().toISOString(),
-  ];
-}
-
-/**
- * Registra uma execução na aba "runs".
- */
-function logRun(run) {
+function logRunBatch(rows) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_RUNS);
-  sheet.appendRow([
-    run.date,
-    run.total_inserted,
-    run.total_records_after,
-    run.status,
-    run.duration_ms,
-    run.ran_at,
-  ]);
+  sheet.getRange(sheet.getLastRow()+1,1,rows.length,RUN_HEADERS.length)
+       .setValues(rows);
 }
 
-// ─── FUNÇÕES DE LEITURA ─────────────────────────────────────────────────────
+// ───────────────── READ ─────────────────
 
-/**
- * Normaliza qualquer formato de data para YYYY-MM-DD.
- * Trata: Date objects, ISO strings (2026-03-27T03:00:00.000Z), YYYY-MM-DD, DD/MM/YYYY.
- */
-function normalizeDate(val) {
-  if (!val) return '';
-  // Date object do Sheets
-  if (val instanceof Date) {
-    return Utilities.formatDate(val, 'America/Sao_Paulo', 'yyyy-MM-dd');
-  }
-  const s = String(val).trim();
-  // ISO com T: 2026-03-27T03:00:00.000Z
-  if (s.includes('T')) return s.slice(0, 10);
-  // Já no formato YYYY-MM-DD
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  // DD/MM/YYYY
-  const dmy = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (dmy) return dmy[3] + '-' + dmy[2] + '-' + dmy[1];
-  return s;
-}──
-
-/**
- * Retorna o total de linhas de dados na aba "filmes" (excluindo cabeçalho).
- */
-function getTotalCount() {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_MOVIES);
-  if (!sheet) return 0;
-  const last = sheet.getLastRow();
-  return last <= 1 ? 0 : last - 1; // desconta o cabeçalho
-}
-
-/**
- * Retorna todos os filmes de uma data específica como array de objetos.
- */
 function getMoviesByDate(date) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_MOVIES);
-  if (!sheet || sheet.getLastRow() <= 1) return [];
+  const data = getSheetData(SHEET_MOVIES);
+  const idx = data.head.indexOf('date');
+  const target = normalizeDate(date);
 
-  const data    = sheet.getDataRange().getValues();
-  const head    = data[0];
-  const dateIdx = head.indexOf('date');
-  const target  = normalizeDate(date);
-
-  return data
-    .slice(1)
-    .filter(row => normalizeDate(row[dateIdx]) === target)
-    .map(row => {
-      const obj = rowToMovie(row, head);
-      obj.date  = normalizeDate(obj.date);
-      return obj;
-    });
+  return data.rows
+    .filter(r => normalizeDate(r[idx]) === target)
+    .map(r => rowToObj(r, data.head));
 }
 
-/**
- * Retorna todas as datas únicas disponíveis, ordenadas do mais recente.
- */
 function getAvailableDates() {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_MOVIES);
-  if (!sheet || sheet.getLastRow() <= 1) return [];
+  const data = getSheetData(SHEET_MOVIES);
+  const idx = data.head.indexOf('date');
 
-  const data    = sheet.getDataRange().getValues();
-  const dateIdx = data[0].indexOf('date');
-  const dates   = new Set(
-    data.slice(1)
-        .map(row => normalizeDate(row[dateIdx]))
-        .filter(Boolean)
-  );
-
-  return [...dates].sort().reverse();
+  return [...new Set(
+    data.rows.map(r => normalizeDate(r[idx]))
+  )].sort().reverse();
 }
 
-/**
- * Retorna o histórico de aparições de um filme pelo ID.
- */
 function getMovieHistory(id) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_MOVIES);
-  if (!sheet || sheet.getLastRow() <= 1) return [];
+  const data = getSheetData(SHEET_MOVIES);
+  const idx = data.head.indexOf('id');
 
-  const data    = sheet.getDataRange().getValues();
-  const head    = data[0];
-  const idIdx   = head.indexOf('id');
-
-  return data
-    .slice(1)
-    .filter(row => String(row[idIdx]) === String(id))
-    .map(row => {
-      const obj = rowToMovie(row, head);
-      obj.date  = normalizeDate(obj.date);
-      return obj;
-    });
+  return data.rows
+    .filter(r => String(r[idx]) === String(id))
+    .map(r => rowToObj(r, data.head));
 }
 
-/**
- * Retorna os filmes que aparecem em mais datas (mais persistentes em cartaz).
- * Retorna top 20 ordenados por número de aparições.
- */
 function getTrending() {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_MOVIES);
-  if (!sheet || sheet.getLastRow() <= 1) return [];
+  const data = getSheetData(SHEET_MOVIES);
 
-  const data    = sheet.getDataRange().getValues();
-  const head    = data[0];
-  const idIdx   = head.indexOf('id');
-  const titleIdx= head.indexOf('title');
-  const postIdx = head.indexOf('poster_path');
-  const scoreIdx= head.indexOf('vote_average');
+  const idIdx    = data.head.indexOf('id');
+  const dateIdx  = data.head.indexOf('date');
+  const titleIdx = data.head.indexOf('title');
+  const postIdx  = data.head.indexOf('poster_path');
+  const scoreIdx = data.head.indexOf('vote_average');
 
-  // Conta aparições por ID
-  const counts = {};
-  const meta   = {};
+  const map = {};
 
-  data.slice(1).forEach(row => {
-    const id = String(row[idIdx]);
-    if (!id) return;
-    counts[id] = (counts[id] || 0) + 1;
-    // Guarda os dados mais recentes do filme
-    meta[id] = {
-      id,
-      title:        row[titleIdx],
-      poster_path:  row[postIdx],
-      vote_average: row[scoreIdx],
-      days_in_theaters: counts[id],
-    };
+  data.rows.forEach(r => {
+    const id = r[idIdx];
+    const d  = normalizeDate(r[dateIdx]);
+
+    if (!map[id]) {
+      map[id] = {
+        id,
+        title: r[titleIdx],
+        poster_path: r[postIdx],
+        vote_average: r[scoreIdx],
+        days: new Set()
+      };
+    }
+
+    map[id].days.add(d);
+
+    // Se ainda não tem poster, tenta atualizar com um válido
+    if (!map[id].poster_path && r[postIdx]) {
+      map[id].poster_path = r[postIdx];
+    }
+
+    // Atualiza score mais recente
+    if (r[scoreIdx]) {
+      map[id].vote_average = r[scoreIdx];
+    }
   });
 
-  return Object.values(meta)
-    .sort((a, b) => b.days_in_theaters - a.days_in_theaters)
-    .slice(0, 20);
-}
-
-/**
- * Retorna o log de execuções.
- */
-function getRunsLog() {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_RUNS);
-  if (!sheet || sheet.getLastRow() <= 1) return [];
-
-  const data = sheet.getDataRange().getValues();
-  const head = data[0];
-
-  return data.slice(1).map(row => {
-    const obj = {};
-    head.forEach((col, i) => { obj[col] = row[i]; });
-    return obj;
-  }).reverse(); // mais recente primeiro
-}
-
-/**
- * Retorna o elenco de um filme pelo ID a partir da aba "elenco".
- * Inclui name, character e photo_url.
- */
-function getMovieCast(id) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_CAST);
-  if (!sheet || sheet.getLastRow() <= 1) return [];
-
-  const data     = sheet.getDataRange().getValues();
-  const head     = data[0];
-  const idIdx    = head.indexOf('movie_id');
-  const nameIdx  = head.indexOf('actor_name');
-  const charIdx  = head.indexOf('character');
-  const photoIdx = head.indexOf('photo_url');
-
-  return data
-    .slice(1)
-    .filter(row => String(row[idIdx]) === String(id))
-    .map(row => ({
-      name:      row[nameIdx]  || '',
-      character: row[charIdx]  || '',
-      photo_url: row[photoIdx] || '',
+  return Object.values(map)
+    .map(m => ({
+      id: m.id,
+      title: m.title,
+      poster_path: m.poster_path,
+      vote_average: m.vote_average,
+      days_in_theaters: m.days.size
     }))
-    // Remove duplicates by name (keep first occurrence)
-    .filter((actor, idx, arr) => arr.findIndex(a => a.name === actor.name) === idx);
+    .sort((a,b)=>b.days_in_theaters-a.days_in_theaters)
+    .slice(0,20);
 }
 
-/**
- * Busca filmes por nome na aba "filmes".
- * Retorna resultados únicos por ID (o mais recente de cada filme).
- */
-function searchMovies(q) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_MOVIES);
-  if (!sheet || sheet.getLastRow() <= 1) return [];
+function getRunsLog() {
+  const data = getSheetData(SHEET_RUNS);
+  return data.rows.map(r=>rowToObj(r,data.head)).reverse();
+}
 
-  const data      = sheet.getDataRange().getValues();
-  const head      = data[0];
-  const titleIdx  = head.indexOf('title');
-  const idIdx     = head.indexOf('id');
-  const posterIdx = head.indexOf('poster_path');
+function getMovieCast(id) {
+  const data = getSheetData(SHEET_CAST);
+  const idxId    = data.head.indexOf('movie_id');
+  const idxName  = data.head.indexOf('actor_name');
+  const idxChar  = data.head.indexOf('character');
+  const idxPhoto = data.head.indexOf('photo_url');
 
-  const seen    = new Set();
-  const results = [];
+  const map = new Map();
 
-  data.slice(1).forEach(row => {
-    const title = String(row[titleIdx] || '').toLowerCase();
-    if (!title.includes(q)) return;
-    const id = String(row[idIdx]);
-    if (seen.has(id)) return;
-    seen.add(id);
-    results.push({
-      id:          row[idIdx],
-      title:       row[titleIdx],
-      poster_path: row[posterIdx] || '',
-    });
+  data.rows.forEach(r => {
+    if (String(r[idxId]) !== String(id)) return;
+
+    const name  = r[idxName];
+    const photo = r[idxPhoto];
+
+    // Se ainda não existe OU encontramos versão com foto melhor
+    if (!map.has(name) || (photo && !map.get(name).photo_url)) {
+      map.set(name, {
+        name,
+        character: r[idxChar] || '',
+        photo_url: photo || ''
+      });
+    }
   });
 
-  return results.slice(0, 10);
+  return Array.from(map.values());
 }
 
-// ─── UTILITÁRIOS ─────────────────────────────────────────────────────────────
+function searchMovies(q) {
+  if (!q) return [];
+  q = q.toLowerCase();
 
-/**
- * Converte uma linha da planilha em objeto JavaScript.
- */
-function rowToMovie(row, headers) {
-  const obj = {};
-  headers.forEach((col, i) => { obj[col] = row[i]; });
-  return obj;
-}
+  const data = getSheetData(SHEET_MOVIES);
+  const titleIdx = data.head.indexOf('title');
+  const idIdx = data.head.indexOf('id');
 
-/**
- * Garante que uma aba existe. Se não existir, cria e adiciona o cabeçalho.
- * Se existir mas sem cabeçalho, adiciona o cabeçalho.
- */
-function ensureSheet(name, headers) {
-  const ss    = SpreadsheetApp.getActiveSpreadsheet();
-  let sheet   = ss.getSheetByName(name);
+  const seen = new Set();
+  const res = [];
 
-  if (!sheet) {
-    sheet = ss.insertSheet(name);
+  for (let i = data.rows.length-1; i>=0; i--) {
+    const r = data.rows[i];
+    const title = String(r[titleIdx]).toLowerCase();
+
+    if (!title.includes(q)) continue;
+
+    const id = r[idIdx];
+    if (seen.has(id)) continue;
+
+    seen.add(id);
+    res.push(rowToObj(r,data.head));
+
+    if (res.length >= 10) break;
   }
 
-  // Adiciona cabeçalho se a aba estiver vazia
+  return res;
+}
+
+// ───────────────── CORE ─────────────────
+
+function getSheetData(name) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(name);
+  if (!sheet || sheet.getLastRow() <= 1) return { head: [], rows: [] };
+
+  const values = sheet.getDataRange().getValues();
+  return {
+    head: values[0],
+    rows: values.slice(1)
+  };
+}
+
+function buildExistingSet(sheet) {
+  const data = sheet.getDataRange().getValues();
+  const idIdx = data[0].indexOf('id');
+  const dateIdx = data[0].indexOf('date');
+
+  const set = new Set();
+
+  data.slice(1).forEach(r=>{
+    set.add(`${r[idIdx]}_${normalizeDate(r[dateIdx])}`);
+  });
+
+  return set;
+}
+
+// ───────────────── UTILS ─────────────────
+
+function normalizeDate(v) {
+  if (!v) return '';
+  if (v instanceof Date) {
+    return Utilities.formatDate(v,'America/Sao_Paulo','yyyy-MM-dd');
+  }
+  const s = String(v);
+  if (s.includes('T')) return s.slice(0,10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const d = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (d) return `${d[3]}-${d[2]}-${d[1]}`;
+  return s;
+}
+
+function today() {
+  return Utilities.formatDate(new Date(),'America/Sao_Paulo','yyyy-MM-dd');
+}
+
+function rowToObj(row, head) {
+  const o = {};
+  head.forEach((h,i)=>o[h]=row[i]);
+  return o;
+}
+
+function ensureSheet(name, headers) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(name);
+
+  if (!sheet) sheet = ss.insertSheet(name);
+
   if (sheet.getLastRow() === 0) {
     sheet.appendRow(headers);
-    // Formata o cabeçalho: negrito + fundo cinza
-    const headerRange = sheet.getRange(1, 1, 1, headers.length);
-    headerRange.setFontWeight('bold');
-    headerRange.setBackground('#efefef');
-    sheet.setFrozenRows(1); // congela o cabeçalho
+    sheet.setFrozenRows(1);
   }
 }
 
-/**
- * Retorna a data de hoje no formato YYYY-MM-DD (fuso de Brasília).
- */
-function today() {
-  return Utilities.formatDate(
-    new Date(),
-    'America/Sao_Paulo',
-    'yyyy-MM-dd'
-  );
+// ───────────────── CACHE ─────────────────
+
+function cached(key, fn) {
+  const cache = CacheService.getScriptCache();
+  const c = cache.get(key);
+  if (c) return json(JSON.parse(c));
+
+  const result = fn();
+  cache.put(key, JSON.stringify(result), CACHE_TTL);
+  return json(result);
 }
 
-/**
- * Retorna uma resposta JSON formatada para o ContentService.
- */
-function jsonResponse(data) {
+function clearCache() {
+  CacheService.getScriptCache().removeAll([]);
+}
+
+function json(data) {
   return ContentService
     .createTextOutput(JSON.stringify(data))
     .setMimeType(ContentService.MimeType.JSON);
