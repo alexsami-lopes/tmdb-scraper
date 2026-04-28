@@ -23,7 +23,7 @@ const CONFIG = {
   retries:       3,
   sheetsApiUrl:  process.env.APPS_SCRIPT_URL,
   sheetsSecret:  process.env.APPS_SCRIPT_SECRET,
-  // recordsLimit:  1200,
+  recordsLimit:  30000,
   // Base URL para imagens do TMDb
   imgBase:       'https://image.tmdb.org/t/p',
 };
@@ -400,7 +400,7 @@ async function main() {
   log('═══════════════════════════════════════════');
 
   // 1. Checa limite de registros
-/*   log('\nConsultando total de registros no Google Sheets...');
+  log('\nConsultando total de registros no Google Sheets...');
   const totalRecords = await getTotalRecords();
 
   if (totalRecords !== null) {
@@ -412,10 +412,7 @@ async function main() {
     }
   } else {
     warn('Não foi possível verificar o total — prosseguindo normalmente.');
-  } */
-
-  // Sem limite — coleta todos os dias indefinidamente
-  log('\nIniciando scraping sem limite de registros.');
+  }
 
   // 2. Coleta links
   const links = await collectMovieLinks();
